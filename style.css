@@ -1,0 +1,413 @@
+/* ════════════════════════════════════════
+   📷 Polaroid Extension  –  Photo Album style
+   ════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500&display=swap');
+
+/* ── 메시지 버튼 ─────────────────────────────────────────── */
+.pol-msg-btn {
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity .2s, color .2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    font-size: 14px;
+    color: var(--SmartThemeBodyColor, #ccc);
+    flex-shrink: 0;
+    touch-action: manipulation;
+}
+.pol-msg-btn:hover { opacity: 1; color: #d4a017 !important; }
+
+/* ── 인라인 폴라로이드 ───────────────────────────────────── */
+.polaroid-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 16px;
+    animation: pol-drop .45s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes pol-drop {
+    from { opacity:0; transform: translateY(-12px) rotate(-4deg) scale(.88); }
+    to   { opacity:1; transform: translateY(0) rotate(-1.5deg) scale(1); }
+}
+
+.pol-frame {
+    background: #ffffff;
+    padding: 10px 10px 38px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.28), 0 1px 4px rgba(0,0,0,.12);
+    transform: rotate(-1.5deg);
+    max-width: 260px;
+    width: 100%;
+    transition: transform .25s ease, box-shadow .25s ease;
+    border-radius: 1px;
+}
+.pol-frame:hover {
+    transform: rotate(0deg) scale(1.04);
+    box-shadow: 0 14px 36px rgba(0,0,0,.32);
+    z-index: 10;
+}
+.pol-img {
+    width: 100%;
+    display: block;
+    object-fit: cover;
+    aspect-ratio: 1/1;
+    cursor: pointer;
+    border-radius: 1px;
+}
+.pol-name {
+    font-family: 'Caveat', cursive, sans-serif;
+    font-size: 15px;
+    color: #2c2c2c;
+    text-align: center;
+    margin-top: 10px;
+    letter-spacing: .3px;
+}
+.pol-hint {
+    font-size: 9px;
+    color: #aaa;
+    text-align: center;
+    margin-top: 3px;
+    padding: 0 4px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.pol-actions {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 7px;
+}
+.pol-btn {
+    background: rgba(0,0,0,.06);
+    border: none;
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    color: #444;
+    transition: background .15s;
+}
+.pol-btn:hover { background: rgba(0,0,0,.13); }
+
+/* ══════════════════════════════════════════
+   갤러리 모달  –  Photo Album / 화이트 클린
+   ══════════════════════════════════════════ */
+.pol-modal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 2147483647;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    backdrop-filter: blur(8px) saturate(1.2);
+    -webkit-backdrop-filter: blur(8px) saturate(1.2);
+}
+
+.pol-modal-box {
+    background: #fafaf8;
+    border-radius: 16px;
+    width: 100%; max-width: 920px;
+    max-height: 90vh;
+    max-height: 90dvh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    box-shadow:
+        0 24px 64px rgba(0,0,0,.18),
+        0 0 0 1px rgba(0,0,0,.07);
+}
+
+/* 타이틀바 — 화이트 베이스 */
+.pol-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: #ffffff;
+    border-bottom: 1px solid #e8e5df;
+    border-radius: 16px 16px 0 0;
+    min-height: 52px;
+    user-select: none;
+    gap: 12px;
+}
+
+.pol-modal-title {
+    font-family: 'Caveat', cursive, sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    color: #2c2c2c;
+    letter-spacing: .3px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+}
+
+/* 닫기 버튼 — 오른쪽 위 */
+.pol-modal-close-btn {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: #f0ede7;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+    flex-shrink: 0;
+    touch-action: manipulation;
+}
+.pol-modal-close-btn:hover {
+    background: #e8e0d5;
+    color: #222;
+}
+
+.pol-char-select {
+    background: #f5f2ec;
+    border: 1px solid #ddd9d0;
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 13px;
+    color: #2c2c2c;
+    min-width: 160px;
+    outline: none;
+    cursor: pointer;
+}
+.pol-char-select:focus {
+    border-color: #c8a96e;
+    box-shadow: 0 0 0 3px rgba(200,169,110,.2);
+}
+
+/* 그리드 영역 */
+.pol-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 24px;
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+    background: #fafaf8;
+}
+
+.pol-empty {
+    grid-column: 1/-1;
+    text-align: center;
+    color: #b0a898;
+    padding: 60px 0;
+    font-size: 14px;
+    font-family: 'Caveat', cursive, sans-serif;
+    font-size: 17px;
+}
+
+/* 갤러리 카드 */
+.pol-card { }
+
+.pol-frame-sm {
+    background: #ffffff;
+    padding: 8px 8px 34px;
+    box-shadow:
+        0 2px 10px rgba(0,0,0,.10),
+        0 0 0 1px rgba(0,0,0,.05);
+    max-width: none; width: 100%;
+    transform: rotate(var(--t, -1deg));
+    cursor: default;
+    border-radius: 1px;
+    transition: transform .22s ease, box-shadow .22s ease;
+}
+.pol-card:nth-child(2n) .pol-frame-sm { --t: 1.3deg; }
+.pol-card:nth-child(3n) .pol-frame-sm { --t: -0.5deg; }
+.pol-card:nth-child(4n) .pol-frame-sm { --t: 2.1deg; }
+.pol-card:nth-child(5n) .pol-frame-sm { --t: -1.8deg; }
+
+.pol-frame-sm:hover {
+    transform: rotate(0deg) scale(1.05) !important;
+    box-shadow: 0 8px 28px rgba(0,0,0,.14), 0 0 0 1px rgba(0,0,0,.06);
+    z-index: 5;
+}
+
+.pol-img-thumb { cursor: zoom-in !important; }
+.pol-date {
+    font-size: 9px;
+    color: #c0b8ae;
+    text-align: center;
+    margin-top: 3px;
+    letter-spacing: .2px;
+}
+
+/* ── 전체화면 뷰어 ─────────────────────────────────────── */
+.pol-full {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.78);
+    z-index: 2147483647;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+.pol-full-inner {
+    position: relative;
+    max-width: 700px; width: 100%;
+    background: #ffffff;
+    padding: 12px 12px 50px;
+    box-shadow: 0 24px 72px rgba(0,0,0,.45);
+    transform: rotate(-.4deg);
+    border-radius: 1px;
+}
+.pol-full-inner img {
+    width: 100%; display: block;
+    object-fit: contain; max-height: 66vh;
+    border-radius: 1px;
+}
+.pol-full-info {
+    text-align: center; margin-top: 12px;
+    font-family: 'Caveat', cursive, sans-serif;
+}
+.pol-full-info strong {
+    font-size: 20px; display: block; color: #1d1d1f;
+}
+.pol-full-info p {
+    font-size: 11px; color: #8e8e93; margin-top: 5px;
+    padding: 0 8px;
+    line-height: 1.5;
+}
+.pol-full-close {
+    position: absolute; top: -14px; right: -14px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #e8e0d5; border: none; color: #444;
+    cursor: pointer; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    transition: background .15s;
+}
+.pol-full-close:hover { background: #ddd4c5; }
+
+/* ── 설정 패널 ────────────────────────────────────────── */
+.pol-settings {
+    display: flex; flex-direction: column;
+    gap: 7px; padding: 6px 0;
+}
+.pol-settings label {
+    font-size: 12px; color: #bbb; margin-bottom: 1px;
+}
+
+/* ── Wand 메뉴 항목 ───────────────────────────────────── */
+#pol-wand-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+#pol-wand-item:hover {
+    background: rgba(255,255,255,.08);
+}
+
+/* ── 스크롤바 ─────────────────────────────────────────── */
+.pol-grid::-webkit-scrollbar { width: 5px; }
+.pol-grid::-webkit-scrollbar-track { background: transparent; }
+.pol-grid::-webkit-scrollbar-thumb {
+    background: #d8d2c8;
+    border-radius: 3px;
+}
+.pol-grid::-webkit-scrollbar-thumb:hover { background: #c8c0b4; }
+
+/* ── 생성 지시 팝업 ───────────────────────────────────── */
+.pol-dir-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.40);
+    z-index: 2147483647;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+.pol-dir-box {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 24px 24px 20px;
+    width: 100%; max-width: 420px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.06);
+    display: flex; flex-direction: column; gap: 14px;
+}
+.pol-dir-title {
+    font-family: 'Caveat', cursive, sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    color: #2c2c2c;
+    display: flex; align-items: center; gap: 8px;
+}
+.pol-dir-desc {
+    font-size: 13px;
+    color: #555;
+    line-height: 1.6;
+}
+.pol-dir-sub {
+    font-size: 11px;
+    color: #aaa;
+}
+.pol-dir-input {
+    width: 100%;
+    border: 1.5px solid #e0dcd4;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #2c2c2c;
+    background: #faf9f7;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color .15s, box-shadow .15s;
+}
+.pol-dir-input:focus {
+    border-color: #c8a96e;
+    box-shadow: 0 0 0 3px rgba(200,169,110,.18);
+    background: #ffffff;
+}
+.pol-dir-btns {
+    display: flex; gap: 10px; justify-content: flex-end;
+}
+.pol-dir-btn {
+    padding: 9px 20px;
+    border-radius: 10px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    touch-action: manipulation;
+}
+.pol-dir-btn-cancel {
+    background: #f0ede7;
+    color: #666;
+}
+.pol-dir-btn-cancel:hover { background: #e8e2d8; }
+.pol-dir-btn-ok {
+    background: #2c2c2c;
+    color: #fff;
+    display: flex; align-items: center; gap: 7px;
+}
+.pol-dir-btn-ok:hover { background: #444; }
+
+/* ── 모바일 ───────────────────────────────────────────── */
+/* 오버레이(.pol-modal / .pol-full / .pol-dir-overlay)가 모바일에서 화면 위쪽으로
+   쏠려 보이던 문제는 대부분 "position:fixed 상태에서 배경 페이지가 스크롤된 채로 유지되는"
+   iOS/안드로이드 브라우저 버그가 원인이라, 실제 수정은 JS의 lockBodyScroll()/unlockBodyScroll()
+   (오버레이 여는 동안 body 스크롤을 잠그는 방식)에서 처리함. 아래는 그걸 보강하는 CSS. */
+@media (max-width: 600px) {
+    .pol-frame { max-width: 220px; }
+    .pol-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 16px; padding: 16px;
+    }
+    .pol-modal-head { flex-wrap: wrap; gap: 8px; }
+    .pol-dir-box { padding: 20px 18px 16px; }
+
+    .pol-modal, .pol-full, .pol-dir-overlay {
+        /* 주소창 접힘/펼침으로 100vh가 실제 보이는 영역보다 커지는 문제 방지 */
+        height: 100dvh;
+        height: 100svh;
+    }
+    .pol-modal-box {
+        max-height: 100dvh;
+        max-height: 100svh;
+    }
+}

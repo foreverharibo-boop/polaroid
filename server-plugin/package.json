@@ -1,0 +1,7 @@
+{
+    "name": "polaroid-proxy",
+    "version": "1.0.0",
+    "description": "Polaroid 확장을 위한 SillyTavern 서버 플러그인. 연결 프로필에 저장된 시크릿을 서버에서 직접 읽어 Gemini/Vertex generateContent(이미지 출력 포함)를 대신 호출합니다. 원본 API 키는 브라우저로 절대 노출되지 않습니다.",
+    "main": "index.js",
+    "private": true
+}

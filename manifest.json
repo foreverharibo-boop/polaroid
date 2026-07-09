@@ -1,0 +1,12 @@
+{
+    "display_name": "📷 Polaroid",
+    "name": "polaroid",
+    "version": "1.1.0",
+    "description": "AI 응답 장면을 이미지로 생성하고 캐릭터별 폴라로이드 앨범에 저장합니다.",
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "author": "custom",
+    "homePage": "",
+    "tags": ["image generation", "gallery"]
+}
