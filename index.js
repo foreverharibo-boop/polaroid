@@ -1,1464 +1,578 @@
-/**
- * 📷 Polaroid - SillyTavern Extension
- * Vertex AI Express (연결 프로필 or 직접 키) 방식으로 이미지 생성
- */
+// Chat Searching
+// 검색 범위: 현재 채팅 / 선택한 캐릭터의 전체 채팅 / SillyTavern 전체 채팅(모든 캐릭터)
+// DOM에 렌더링됐는지, is_system(고스트)으로 숨겨졌는지와 무관하게
+// 저장된 원본 메시지 배열을 대상으로 검색함.
+// + 검색 결과 북마크 (localStorage)
+// + 다크/라이트 테마 토글 (localStorage에 저장돼서 다음에 열 때도 유지됨)
 
-import { getContext, extension_settings } from '../../../extensions.js';
-import { saveSettingsDebounced, eventSource, event_types } from '../../../../script.js';
+const BOOKMARK_KEY = 'chatSearching_bookmarks_v1';
+const THEME_KEY = 'chatSearching_theme_v1';
 
-// ── style.css 로드 (fetch 후 <style> 태그로 직접 주입) ─────────
-// <link rel="stylesheet">를 안 쓰는 이유: 일부 환경(Termux 서버 등)에서 .css를
-// text/plain으로 내려주면 브라우저가 스타일시트로 인식하지 않고 막아버리는 경우가
-// 있었음. fetch로 텍스트만 받아서 <style>에 넣으면 Content-Type과 무관하게 항상 적용됨.
-// (예전에는 이 CSS를 index.js 안에 통째로 복사해서 하드코딩했었는데, 그러면 style.css
-//  파일을 아무리 고쳐도 화면엔 반영되지 않는 상태가 됨 — 지금은 style.css가 유일한
-//  진짜 스타일 소스이고, 여기서 그 파일을 그대로 읽어와서 적용함)
-async function injectStyles() {
-    if (document.getElementById('pol-injected-css')) return;
-    try {
-        const cssUrl = new URL('./style.css', import.meta.url).href;
-        const res = await fetch(cssUrl, { cache: 'no-cache' });
-        if (!res.ok) throw new Error(`style.css fetch 실패 [${res.status}]`);
-        const cssText = await res.text();
-        const style = document.createElement('style');
-        style.id = 'pol-injected-css';
-        style.textContent = cssText;
-        document.head.appendChild(style);
-    } catch (e) {
-        console.warn('[Polaroid] style.css 로드 실패, 최소 폴백 스타일 사용:', e);
-        ensureFallbackStyles();
-    }
-}
-
-const EXT = 'polaroid';
-
-// ── 모델 목록 ─────────────────────────────────────────────
-const IMAGE_MODELS = [
-    { value: 'gemini-3.1-flash-image',  label: '🍌 Gemini 3.1 Flash Image (Nano Banana 2, GA)' },
-    { value: 'gemini-3-pro-image',      label: 'Gemini 3 Pro Image (Nano Banana Pro, GA)' },
-    { value: 'gemini-3.5-flash',        label: '✨ Gemini 3.5 Flash (이미지+텍스트)' },
-    { value: 'gemini-2.5-flash-image',  label: 'Gemini 2.5 Flash Image (Nano Banana)' },
-];
-
-const PROMPT_MODELS = [
-    { value: 'gemini-3.5-flash',     label: '✨ Gemini 3.5 Flash' },
-    { value: 'gemini-3.1-flash-lite',label: 'Gemini 3.1 Flash Lite' },
-    { value: 'gemini-2.5-flash',     label: 'Gemini 2.5 Flash' },
-    { value: 'gemini-2.5-flash-lite',label: 'Gemini 2.5 Flash Lite' },
-];
-
-const DEFAULTS = {
-    api_mode: 'direct',          // 'profile' = 서버 플러그인 경유(키 자동) | 'direct' = 직접 입력
-    profile_provider: 'aistudio', // 'aistudio' = Google AI Studio 키 | 'vertex' = Vertex AI Express 키
-    project_id: '',
-    region: 'global',
-    direct_api_key: '',
-    direct_project_id: '',
-    direct_region: 'global',
-    image_model: 'gemini-3.1-flash-image',
-    prompt_model: 'gemini-3.5-flash',
-    image_style: 'cinematic photo, high quality, detailed lighting',
-    negative_prompt: 'blurry, low quality, distorted, text, watermark',
+const ICONS = {
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+    bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+    user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/></svg>',
+    star: '<svg viewBox="0 0 24 24"><path d="M12 2.5 15 9l7 .9-5.1 4.8L18.2 21 12 17.3 5.8 21l1.3-6.3L2 9.9 9 9l3-6.5Z"/></svg>',
+    sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+    moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>',
 };
 
-function getExtSettings() {
-    try {
-        const ctx = (typeof getContext === 'function' ? getContext : SillyTavern.getContext)();
-        if (!ctx.extensionSettings) return null;
-        if (!ctx.extensionSettings[EXT]) ctx.extensionSettings[EXT] = {};
-        return ctx.extensionSettings[EXT];
-    } catch(e) {
-        return extension_settings[EXT] || null;
+function getRequestHeadersSafe() {
+    const context = SillyTavern.getContext();
+    if (typeof context.getRequestHeaders === 'function') {
+        return context.getRequestHeaders();
     }
+    // 폴백: getRequestHeaders가 getContext에 없는 버전 대비
+    const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+    return {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': tokenMeta ? tokenMeta.content : '',
+    };
 }
 
-function cfg() {
-    const s = getExtSettings();
-    if (!s) return { ...DEFAULTS };
-    return Object.assign({}, DEFAULTS, s);
-}
-
-// ── 프로필 모드: 서버 플러그인(polaroid-proxy) 경유 호출 ──────────
-// 왜 필요한가: 브라우저(확장 JS)에서 /api/secrets/view를 호출하면 최신 ST는
-// 보안상 403을 돌려줘서 원본 키를 프론트로 절대 못 가져온다. 반면 서버 플러그인은
-// ST 서버 프로세스 안에서 동작하므로 secrets.json을 직접 읽을 수 있다.
-// 그래서 "이 프로필의 secretId로 이 요청을 대신 쏴줘" 라고 서버 플러그인에 위임하고,
-// 응답(이미지 inlineData 포함)만 돌려받는다. 키 값 자체는 브라우저에 절대 노출되지 않는다.
-// 필요 조건: plugins/polaroid-proxy 서버 플러그인이 설치되어 있고
-// config.yaml의 enableServerPlugins: true 여야 함. (README.md 참고)
-async function proxyGenerate(model, body) {
-    const c = cfg();
-    const profileId = c.profile_id || '';
-    if (!profileId) {
-        throw new Error('설정 패널에서 연결 프로필을 먼저 선택하고 저장해주세요.');
-    }
-
-    const svc = SillyTavern.getContext().ConnectionManagerRequestService;
-    const profile = svc.getSupportedProfiles().find(p => p.id === profileId);
-    if (!profile) throw new Error('선택한 연결 프로필을 찾을 수 없습니다. 설정에서 다시 선택해주세요.');
-
-    const secretId = profile['secret-id'];
-    if (!secretId) {
-        throw new Error('이 프로필에는 secret-id가 없습니다 (키가 필요 없는 백엔드이거나 지원되지 않는 프로필 형식입니다).');
-    }
-
-    const res = await fetch('/api/plugins/polaroid-proxy/generate', {
+async function fetchChatList(avatarUrl) {
+    const res = await fetch('/api/characters/chats', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: getRequestHeadersSafe(),
+        body: JSON.stringify({ avatar_url: avatarUrl }),
+    });
+    if (!res.ok) throw new Error(`chat list fetch failed: ${res.status}`);
+    const data = await res.json();
+    // 버전에 따라 배열 또는 객체로 올 수 있어서 둘 다 처리
+    return Array.isArray(data) ? data : Object.values(data);
+}
+
+async function fetchChatContent(chName, avatarUrl, fileName) {
+    const res = await fetch('/api/chats/get', {
+        method: 'POST',
+        headers: getRequestHeadersSafe(),
         body: JSON.stringify({
-            secretId,
-            provider: c.profile_provider || 'aistudio', // 'aistudio' | 'vertex'
-            model,
-            projectId: c.project_id || '',
-            region: c.region || 'global',
-            body,
+            ch_name: chName,
+            avatar_url: avatarUrl,
+            file_name: fileName.replace(/\.jsonl$/, ''),
         }),
     });
-
-    if (!res.ok) {
-        let detail = '';
-        try { detail = JSON.stringify(await res.json()); } catch (_) { detail = await res.text().catch(() => ''); }
-        throw new Error(
-            `polaroid-proxy 서버 플러그인 호출 실패 [${res.status}]: ${detail.slice(0, 300)}\n` +
-            `서버 플러그인이 설치/활성화 되어있는지 확인해주세요 (plugins/polaroid-proxy, config.yaml enableServerPlugins: true).`
-        );
-    }
-    return await res.json();
+    if (!res.ok) throw new Error(`chat content fetch failed for ${fileName}: ${res.status}`);
+    return res.json(); // [0] = 메타데이터, [1..] = 실제 메시지
 }
 
-// ── Vertex AI Express 직접 호출 ───────────────────────────
-async function vertexPost(apiKey, projectId, region, model, body) {
-    const regions = region === 'global' ? ['global', 'us-central1'] : [region];
-    let lastErr;
-
-    for (const r of regions) {
-        const isLast = r === regions[regions.length - 1];
-        const base = r === 'global'
-            ? 'https://aiplatform.googleapis.com/v1'
-            : `https://${r}-aiplatform.googleapis.com/v1`;
-        const url = `${base}/projects/${projectId}/locations/${r}/publishers/google/models/${model}:generateContent`;
-
-        try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': apiKey,
-                },
-                body: JSON.stringify(body),
-            });
-
-            if (!res.ok) {
-                const err = await res.text();
-                lastErr = new Error(`Vertex API [${res.status}] (${r}/${model}): ${err.slice(0, 300)}`);
-                // 404/400은 "이 리전/모델 조합이 안 맞음"일 가능성이 높으니 다음 리전으로 폴백
-                if ((res.status === 404 || res.status === 400) && !isLast) continue;
-                throw lastErr;
-            }
-            return await res.json();
-        } catch (e) {
-            lastErr = e;
-            if (!isLast) continue;
-            throw e;
-        }
-    }
-    throw lastErr || new Error('Vertex API 호출 실패');
+function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
 }
 
-// ── 통합 API 호출 ─────────────────────────────────────────
-async function apiPost(model, body) {
-    const c = cfg();
-    let apiKey = '';
-    let projectId = c.project_id || '';
-    let region = c.region || 'global';
-
-    if (c.api_mode === 'profile') {
-        // 프로필 모드: 키를 브라우저로 가져오지 않고, 서버 플러그인에 위임해서 호출한다
-        return proxyGenerate(model, body);
-    } else {
-        apiKey = c.direct_api_key || '';
-        projectId = c.direct_project_id || '';
-        region = c.direct_region || 'global';
-        if (!apiKey) throw new Error('API 키가 없습니다. 설정 패널에서 Vertex AI Express 키(AIza...)를 입력해주세요.');
-    }
-
-    return vertexPost(apiKey, projectId, region, model, body);
+function highlightSnippet(text, query, radius = 60) {
+    const lower = text.toLowerCase();
+    const idx = lower.indexOf(query.toLowerCase());
+    if (idx === -1) return escapeHtml(text.slice(0, radius * 2));
+    const start = Math.max(0, idx - radius);
+    const end = Math.min(text.length, idx + query.length + radius);
+    const before = escapeHtml(text.slice(start, idx));
+    const match = escapeHtml(text.slice(idx, idx + query.length));
+    const after = escapeHtml(text.slice(idx + query.length, end));
+    return `${start > 0 ? '…' : ''}${before}<mark>${match}</mark>${after}${end < text.length ? '…' : ''}`;
 }
 
-// ── 최근 채팅 맥락 수집 (버튼 누른 메시지 + 직전 N개) ────
-function getRecentChatContext(mesEl, maxMessages = 6) {
-    // 버튼이 달린 메시지의 mesid
-    const targetId = parseInt(mesEl.getAttribute('mesid') || '-1', 10);
-
-    // 채팅창에 보이는 모든 .mes 수집
-    const allMes = Array.from(document.querySelectorAll('.mes'));
-
-    // 대상 메시지 인덱스 찾기
-    const targetIdx = allMes.findIndex(el => parseInt(el.getAttribute('mesid') || '-1', 10) === targetId);
-    const endIdx = targetIdx >= 0 ? targetIdx : allMes.length - 1;
-
-    // 대상 포함해서 최대 maxMessages개 소급
-    const slice = allMes.slice(Math.max(0, endIdx - maxMessages + 1), endIdx + 1);
-
-    const lines = slice.map(el => {
-        const isUser = el.getAttribute('is_user') === 'true' || el.classList.contains('is_user');
-        const name = el.querySelector('.name_text')?.innerText?.trim() || (isUser ? 'User' : 'Character');
-        const text = el.querySelector('.mes_text')?.innerText?.trim() || '';
-        if (!text) return null;
-        return `[${isUser ? 'USER' : 'CHARACTER'} — ${name}]: ${text}`;
-    }).filter(Boolean);
-
-    return lines.join('\n\n');
+function highlightFull(text, query) {
+    const escaped = escapeHtml(text);
+    const escapedQuery = escapeHtml(query);
+    // escapeHtml 이후 문자열 기준으로 대소문자 무시 전체 치환
+    const re = new RegExp(escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    return escaped.replace(re, (m) => `<mark>${m}</mark>`);
 }
 
-// ── ST 연결 프로필 응답에서 텍스트 추출 (응답 형태가 provider마다 다를 수 있어 방어적으로 처리) ──
-function extractProfileText(result) {
-    if (result == null) return '';
-    if (typeof result === 'string') return result.trim();
-    if (typeof result.content === 'string') return result.content.trim();
-    if (typeof result.text === 'string') return result.text.trim();
-    if (result.message && typeof result.message.content === 'string') return result.message.content.trim();
-    if (Array.isArray(result.choices) && result.choices[0]?.message?.content) {
-        return String(result.choices[0].message.content).trim();
-    }
-    console.warn('[Polaroid] 프로필 응답 형식을 인식하지 못함, 원문:', JSON.stringify(result)?.slice(0, 500));
-    return '';
+// ---------- 테마 ----------
+
+function getSavedTheme() {
+    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
 }
 
-// ── 텍스트 생성 (장면 → 이미지 프롬프트) ──────────────────
-async function summarizeSceneCore(sceneText, chatContext, promptModel) {
-    const c = cfg();
-    console.log('[Polaroid] sceneText 길이/내용:', sceneText?.length, sceneText?.slice(0, 200));
-    console.log('[Polaroid] chatContext 길이/내용:', chatContext?.length, chatContext?.slice(0, 300));
-    // 오래된 대화부터 잘리지 않도록 "뒤(최근)"에서부터 잘라서 사용 (2만자)
-    const ctx = (chatContext || sceneText);
-    const recentCtx = ctx.length > 20000 ? '...' + ctx.slice(-20000) : ctx;
-
-    const summaryPrompt = `Below is a roleplay chat (oldest to newest). Focus ONLY on the LAST message — that is the current moment to capture.
-Summarize the CURRENT physical scene in ONE short sentence (under 25 words).
-Only describe: who is doing what, where, with what objects/clothing — concrete and literal, taken from the LAST message.
-Earlier messages are background only — use them solely to clarify pronouns/location if the last message is ambiguous. Do NOT pull the scene from earlier messages if the last message describes something different.
-
-CHAT (oldest → newest):
-${recentCtx}
-
-THE LAST MESSAGE IS THE SCENE TO CAPTURE:
-${sceneText.slice(0, 5000)}
-
-Return ONLY the one-sentence summary. No explanation.`;
-
-    // ── 프로필 모드: ST에 이미 연결된 프로필로 바로 요청 (키 직접 입력 불필요) ──
-    if (c.api_mode === 'profile' && c.profile_id) {
-        const svc = SillyTavern.getContext().ConnectionManagerRequestService;
-        const result = await svc.sendRequest(c.profile_id, summaryPrompt, 300, { extractData: true });
-        const text = extractProfileText(result);
-        console.log('[Polaroid] (프로필모드) 요약 결과:', text);
-        return text;
-    }
-
-    const data = await apiPost(promptModel, {
-        contents: [{ role: 'user', parts: [{ text: summaryPrompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 20000 },
-        safetySettings: [
-            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'OFF' },
-        ],
-    });
-    console.log('[Polaroid] 요약 finishReason:', data?.candidates?.[0]?.finishReason, '| raw text:', JSON.stringify(data?.candidates?.[0]?.content?.parts?.[0]?.text));
-    if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-        console.warn('[Polaroid] 요약 응답 비정상:', JSON.stringify(data?.candidates?.[0] || data));
-    }
-    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+function applyTheme(theme) {
+    const $panel = $('.cs-panel');
+    $panel.removeClass('cs-theme-dark cs-theme-light').addClass(`cs-theme-${theme}`);
+    // 다음에 누르면 반대 테마로 갈 거라는 걸 아이콘으로 보여줌
+    $('#cs-theme-btn').html(theme === 'dark' ? ICONS.sun : ICONS.moon)
+        .attr('title', theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환');
+    localStorage.setItem(THEME_KEY, theme);
 }
 
-async function generatePrompt(sceneText, charInfo, userDirection, chatContext) {
-    const c = cfg();
-    const charDesc = [
-        charInfo.name && `Name: ${charInfo.name}`,
-        charInfo.description && `Appearance: ${charInfo.description.slice(0, 5000)}`,
-        charInfo.personaName && `User persona name: ${charInfo.personaName}`,
-        charInfo.personaDescription && `User persona appearance: ${charInfo.personaDescription.slice(0, 5000)}`,
-    ].filter(Boolean).join('\n');
-
-    // 프로필 모드면 프로필의 모델 사용, 아니면 prompt_model 사용
-    let promptModel = c.prompt_model || 'gemini-3.5-flash';
-    if (c.api_mode === 'profile' && c.profile_id) {
-        try {
-            const svc = SillyTavern.getContext().ConnectionManagerRequestService;
-            const profile = svc.getSupportedProfiles().find(p => p.id === c.profile_id);
-            if (profile?.model) promptModel = profile.model;
-        } catch(_) {}
-    }
-
-    let sceneSummary = '';
-    if (!userDirection) {
-        try {
-            sceneSummary = await summarizeSceneCore(sceneText, chatContext, promptModel);
-            console.log('[Polaroid] scene summary:', sceneSummary);
-        } catch (_) {}
-    }
-
-    // 캐릭터/페르소나 프사가 있으면, 직접 모드에서는 이미지 레퍼런스로 함께 전달
-    const refNote = (charInfo.avatarBase64 || charInfo.personaAvatarBase64)
-        ? '\n\nReference images are attached below — they show the actual face/hair/body of the character and/or user persona. Use them to keep appearance accurate and consistent with the description above.'
-        : '';
-
-    const promptText = userDirection
-        ? `Generate an image prompt for this character:
-${charDesc}${refNote}
-
-SCENE TO DRAW: "${userDirection}"
-
-Write a short English image generation prompt (under 120 words) showing exactly that scene with this character. Describe the scene, character appearance, setting, and lighting ONLY — do NOT write any style/quality/photography keywords (those will be appended separately).
-Return ONLY the scene description. No explanation, no style tags.`
-        : `Generate an image prompt for this character:
-${charDesc}${refNote}
-
-SCENE TO DRAW (literal, concrete — follow exactly): "${sceneSummary || sceneText.slice(0, 200)}"
-
-Write a single English image generation prompt (under 180 words) showing exactly that scene/action/location with this character. Add setting and lighting details consistent with the scene above. Do NOT replace the scene with a generic or unrelated situation. Describe the scene, character appearance, setting, and lighting ONLY — do NOT write any style/quality/photography keywords (those will be appended separately).
-Return ONLY the scene description. No explanation, no style tags.`;
-
-    let sceneDescription = '';
-
-    if (c.api_mode === 'profile' && c.profile_id) {
-        // ── 프로필 모드: ST 연결 프로필로 바로 요청 (키 직접 입력 불필요) ──
-        // 주의: 이 경로는 텍스트 전용이라 캐릭터/페르소나 "프사 이미지"는 함께 보낼 수 없고
-        // 이름 + 설명 텍스트(위 charDesc, 5000자)만 반영됩니다. 프사까지 참고시키려면 "직접 입력" 모드를 사용하세요.
-        try {
-            const svc = SillyTavern.getContext().ConnectionManagerRequestService;
-            const result = await svc.sendRequest(c.profile_id, promptText, 20000, { extractData: true });
-            sceneDescription = extractProfileText(result);
-            console.log('[Polaroid] (프로필모드) 프롬프트 생성 결과:', sceneDescription);
-        } catch (e) {
-            console.warn('[Polaroid] 프로필 모드 프롬프트 생성 실패:', e);
-            throw new Error('연결 프로필로 요청 실패: ' + (e.message || e));
-        }
-    } else {
-        // ── 직접 입력 모드: 캐릭터/페르소나 프사를 레퍼런스로 함께 전달 (외모 일치도 향상) ──
-        const parts = [];
-        if (charInfo.avatarBase64) {
-            parts.push({ text: `Reference image of ${charInfo.name || 'the character'} (face/hair/body reference only):` });
-            parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.avatarBase64 } });
-        }
-        if (charInfo.personaAvatarBase64) {
-            parts.push({ text: `Reference image of user persona ${charInfo.personaName || ''} (face/hair/body reference only):` });
-            parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
-        }
-        parts.push({ text: promptText });
-
-        const data = await apiPost(promptModel, {
-            contents: [{ role: 'user', parts }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 20000 },
-            safetySettings: [
-                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' },
-                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
-                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'OFF' },
-                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
-                { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'OFF' },
-            ],
-        });
-        console.log('[Polaroid] 프롬프트 finishReason:', data?.candidates?.[0]?.finishReason);
-        sceneDescription = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-    }
-
-    if (!sceneDescription) return '';
-
-    // 등록된 스타일/네거티브 문구는 AI가 줄이지 못하도록 코드에서 그대로(토씨 하나 안 틀리고) 이어붙임
-    const styleSuffix = c.image_style ? `\nStyle: ${c.image_style}` : '';
-    const negativeSuffix = c.negative_prompt ? `\nNegative: ${c.negative_prompt}` : '';
-    return sceneDescription + styleSuffix + negativeSuffix;
+function toggleTheme() {
+    const current = getSavedTheme();
+    applyTheme(current === 'dark' ? 'light' : 'dark');
 }
 
-// ── 이미지 생성 ────────────────────────────────────────────
-async function generateImage(imagePrompt, charInfo) {
-    const c = cfg();
-    const parts = [];
+// ---------- 북마크 저장소 (localStorage) ----------
 
-    if (charInfo.avatarBase64) {
-        parts.push({ text: `CRITICAL REFERENCE IMAGE of ${charInfo.name || 'the character'}. This shows their EXACT true face — same face shape, eyes, eye color, nose, mouth, skin tone, hair color and hairstyle MUST be replicated precisely in the generated image, with zero deviation. Study this face carefully before drawing. USE ONLY for face/hair/body type — do NOT copy this reference's clothing, pose, expression, background, or situation; the scene text below overrides all of that.` });
-        parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.avatarBase64 } });
-    }
-    if (charInfo.personaAvatarBase64) {
-        parts.push({ text: `CRITICAL REFERENCE IMAGE of user persona ${charInfo.personaName || ''}. This shows their EXACT true face — same face shape, eyes, eye color, nose, mouth, skin tone, hair color and hairstyle MUST be replicated precisely, with zero deviation. USE ONLY for face/hair/body type — do NOT copy this reference's clothing, pose, or background.` });
-        parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
-    }
-
-    const finalPrompt = `The reference image(s) above show the REAL faces that MUST appear in the output — match face shape, eyes, hair, and skin tone exactly, as if it's the same person photographed in a new scene. IGNORE only the reference's clothing, pose, background, and situation. Generate exactly the following scene:\n\n${imagePrompt}` + (c.negative_prompt ? `\n\nDo NOT include: ${c.negative_prompt}` : '') + `\n\nReminder: face/hair/skin tone must match the reference image(s) precisely.`;
-    parts.push({ text: finalPrompt });
-
-    const data = await apiPost(c.image_model, {
-        contents: [{ role: 'user', parts }],
-        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
-        safetySettings: [
-            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
-            { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'OFF' },
-        ],
-    });
-
-    const outParts = data?.candidates?.[0]?.content?.parts || [];
-    const imgPart = outParts.find(p => p.inlineData);
-    if (!imgPart) throw new Error('이미지 생성 결과가 없습니다. 모델/리전을 확인하세요.');
-    return imgPart.inlineData;
+function makeBookmarkId(entry) {
+    // 같은 캐릭터/파일/메시지 인덱스면 같은 결과로 취급
+    return `${entry.avatarUrl || 'na'}::${entry.fileName || 'current'}::${entry.msgIndex ?? 'x'}`;
 }
 
-// ── 이미지 가져오기 helpers ────────────────────────────────
-async function fetchImageAsBase64(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`avatar fetch ${res.status}`);
-    const blob = await res.blob();
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
-}
-
-async function getCharacterInfo() {
-    const ctx = getContext();
-    const info = {
-        name: '', description: '', personality: '',
-        avatarBase64: null,
-        personaName: '', personaDescription: '',
-        personaAvatarBase64: null,
-    };
-
-    if (ctx.characters && ctx.characterId !== undefined) {
-        const ch = ctx.characters[ctx.characterId];
-        if (ch) {
-            info.name = ch.name || '';
-            info.description = ch.description || '';
-            info.personality = ch.personality || '';
-            if (ch.avatar && ch.avatar !== 'none') {
-                try {
-                    info.avatarBase64 = await fetchImageAsBase64(
-                        `/thumbnail?type=avatar&file=${encodeURIComponent(ch.avatar)}`
-                    );
-                } catch (_) {}
-            }
-        }
-    }
-
-    // 페르소나 우선순위 (ST persona 잠금 시스템 구조에 따름):
-    // 1. 캐릭터 고정(Character Lock) — power_user.persona_descriptions[avatarId].connections 에
-    //    {type:'character', id: 현재캐릭터아바타} 가 들어있는 persona. "이 캐릭터엔 항상 이 페르소나" 라는 의도가
-    //    가장 명확하게 드러나는 곳이라 최우선.
-    // 2. 채팅 고정(Chat Lock) — chat_metadata.persona. persona_auto_lock 켜져있으면 수동 전환 시
-    //    조용히 여기에 재기록되므로 캐릭터 고정보다 후순위로 둠 (의도치 않은 덮어쓰기 방지).
-    // 3. DOM에서 현재 선택된 페르소나 / pus.default_persona
-    // 4. ctx.name1 (ST가 {{user}} 치환에 실제로 쓰는 값) — 위에서 아무것도 못 찾았을 때 마지막 보험
+function loadBookmarks() {
     try {
-        const pus = ctx.powerUserSettings || {};
-        const personas = pus.personas || {};
-        const personaDescriptions = pus.persona_descriptions || {};
-
-        const currentCharAvatar = (ctx.characters && ctx.characterId !== undefined)
-            ? ctx.characters[ctx.characterId]?.avatar
-            : '';
-
-        // 1) 캐릭터 고정: connections 배열에서 현재 캐릭터와 매칭되는 persona 키 찾기
-        let lockedAvatarKey = '';
-        if (currentCharAvatar) {
-            for (const [avatarId, desc] of Object.entries(personaDescriptions)) {
-                const conns = desc?.connections || [];
-                if (conns.some(c => c?.type === 'character' && c.id === currentCharAvatar)) {
-                    lockedAvatarKey = avatarId;
-                    break;
-                }
-            }
-        }
-
-        let activeKey = '';
-        let p = null;
-
-        if (lockedAvatarKey) {
-            activeKey = lockedAvatarKey;
-            p = personas[activeKey];
-        }
-
-        // 2) 채팅 고정 (chat_metadata.persona)
-        if (!p) {
-            const chatLockedKey = ctx.chatMetadata?.persona;
-            if (chatLockedKey && personas[chatLockedKey]) {
-                activeKey = chatLockedKey;
-                p = personas[activeKey];
-            }
-        }
-
-        // 3) DOM: 현재 선택된 persona 항목
-        if (!p) {
-            const personaSelectEl = document.querySelector('#persona_select');
-            if (personaSelectEl?.value) {
-                activeKey = personaSelectEl.value;
-                p = personas[activeKey];
-            }
-        }
-        if (!p) {
-            const selectedEl = document.querySelector('.persona_select_item.selected, [data-persona].selected');
-            if (selectedEl) {
-                activeKey = selectedEl.dataset?.persona || selectedEl.value || '';
-                p = personas[activeKey];
-            }
-        }
-        if (!p && pus.default_persona) {
-            activeKey = pus.default_persona;
-            p = personas[activeKey];
-        }
-
-        // persona_description에서 이름 파싱 (혜담은 같은 경우)
-        let personaNameFromDesc = '';
-        if (pus.persona_description) {
-            const nameMatch = pus.persona_description.match(/이름[^\n]*?([가-힣a-zA-Z]+)/);
-            if (nameMatch) personaNameFromDesc = nameMatch[1].trim();
-        }
-
-        const name1 = ctx.name1 || '';
-
-        console.log('[Polaroid] 페르소나 디버그:', {
-            currentCharAvatar,
-            lockedAvatarKey,
-            chat_persona_lock: ctx.chatMetadata?.persona,
-            activeKey,
-            'personas[activeKey]': p,
-            name1,
-        });
-
-        if (p) {
-            // power_user.personas[key]는 ST 기본 구조상 이름 문자열이지만,
-            // 혹시 모를 포크/구버전 대응으로 객체 형태도 같이 처리
-            const isStringPersona = typeof p === 'string';
-            const pName = isStringPersona ? p : p.name;
-            const descObj = personaDescriptions[activeKey];
-            const pDesc = descObj?.description || (isStringPersona ? '' : p.description);
-            const pAvatar = isStringPersona ? '' : (p.avatar || p.filename);
-
-            // 캐릭터 고정으로 찾은 거면 그 이름이 절대 우선 (name1보다도 위)
-            info.personaName = (lockedAvatarKey ? pName : (name1 || pName))
-                || personaNameFromDesc || activeKey || '';
-            info.personaDescription = pDesc || pus.persona_description || '';
-            // 키 자체가 파일명 (예: '1782536480473-Adalovelace.png')
-            const avatarFile = pAvatar || activeKey || '';
-            if (avatarFile && avatarFile !== 'none') {
-                try {
-                    info.personaAvatarBase64 = await fetchImageAsBase64(
-                        `/thumbnail?type=persona&file=${encodeURIComponent(avatarFile)}`
-                    );
-                } catch (_) {
-                    try {
-                        info.personaAvatarBase64 = await fetchImageAsBase64(
-                            `/User Avatars/${encodeURIComponent(avatarFile)}`
-                        );
-                    } catch (_) {}
-                }
-            }
-        } else {
-            // 페르소나 객체 못 찾아도 이름은 name1 → description파싱 → activeKey(파일명보단 낫음) → name2 순으로
-            info.personaName = name1 || personaNameFromDesc || activeKey || pus.name2 || '';
-            info.personaDescription = pus.persona_description || '';
-            // user-default.png가 activeKey면 아바타 시도
-            if (!activeKey) activeKey = 'user-default.png';
-            try {
-                info.personaAvatarBase64 = await fetchImageAsBase64(
-                    `/thumbnail?type=persona&file=${encodeURIComponent(activeKey)}`
-                );
-            } catch (_) {}
-        }
-    } catch(e) {
-        console.warn('[Polaroid] 페르소나 읽기 실패:', e);
-    }
-
-    console.log('[Polaroid] charInfo:', {
-        char: info.name,
-        persona: info.personaName,
-        hasCharAvatar: !!info.avatarBase64,
-        hasPersonaAvatar: !!info.personaAvatarBase64,
-    });
-    return info;
-}
-
-// ── 갤러리 저장/불러오기 (ST 서버 저장 — 기기 간 동기화) ──────
-// ST의 /api/userdata 엔드포인트 사용 (확장에서 접근 가능한 공식 경로).
-// 인덱스 파일(user/polaroid/index.json)에 id 목록을 관리하고,
-// 각 사진은 user/polaroid/photos/{id}.json 으로 저장.
-// → 컴·폰 모두 같은 ST 서버를 바라보므로 갤러리가 자동으로 동기화됨.
-
-const GALLERY_PREFIX = 'polaroid_v1_'; // 구버전 localStorage 마이그레이션용
-const POL_DIR = 'user/polaroid';
-const INDEX_FILE = `${POL_DIR}/index.json`;
-
-// ST /api/userdata 헬퍼
-async function serverSave(path, data) {
-    const res = await fetch('/api/userdata/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, data: typeof data === 'string' ? data : JSON.stringify(data) }),
-    });
-    if (!res.ok) {
-        const msg = await res.text().catch(() => res.status);
-        throw new Error(`서버 저장 실패 [${res.status}]: ${path} — ${msg}`);
-    }
-}
-
-async function serverLoad(path) {
-    const res = await fetch('/api/userdata/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-    });
-    if (res.status === 404 || res.status === 400) return null;
-    if (!res.ok) {
-        const msg = await res.text().catch(() => res.status);
-        throw new Error(`서버 읽기 실패 [${res.status}]: ${path} — ${msg}`);
-    }
-    const text = await res.text();
-    // ST가 { data: "..." } 형태로 감싸서 줄 수도 있음
-    try {
-        const outer = JSON.parse(text);
-        if (outer && typeof outer.data === 'string') return JSON.parse(outer.data);
-        return outer;
-    } catch { return null; }
-}
-
-async function serverDelete(path) {
-    try {
-        await fetch('/api/userdata/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path }),
-        });
-    } catch (_) {}
-}
-
-// 서버 API 사용 가능 여부 (첫 호출 때 자동 판별, 이후 캐시)
-let _useServer = null;
-async function checkServerAvailable() {
-    if (_useServer !== null) return _useServer;
-    try {
-        const res = await fetch('/api/userdata/load', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: INDEX_FILE }),
-        });
-        // 404(파일 없음)도 "서버는 살아있음"으로 판단
-        _useServer = (res.status !== 403 && res.status !== 405 && res.status !== 501);
-    } catch(_) {
-        _useServer = false;
-    }
-    console.log('[Polaroid] 서버 저장 모드:', _useServer ? '✅ /api/userdata' : '⚠️ IndexedDB 폴백');
-    return _useServer;
-}
-
-// ── IndexedDB 폴백 ────────────────────────────────────────
-const DB_NAME = 'PolaroidGallery';
-const DB_VERSION = 1;
-const STORE_NAME = 'photos';
-let _dbPromise = null;
-function openDB() {
-    if (_dbPromise) return _dbPromise;
-    _dbPromise = new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-                store.createIndex('character', 'character', { unique: false });
-            }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-    return _dbPromise;
-}
-
-// 인덱스 읽기 (없으면 빈 배열)
-async function loadIndex() {
-    return (await serverLoad(INDEX_FILE)) || [];
-}
-
-// 인덱스 저장
-async function saveIndex(index) {
-    await serverSave(INDEX_FILE, index);
-}
-
-async function saveToGallery(charName, base64Image, meta) {
-    if (await checkServerAvailable()) {
-        // ── 서버 저장 ──
-        const id = Date.now() + '_' + Math.floor(Math.random() * 1e6);
-        const item = { id, character: charName, image: base64Image, ...meta };
-        await serverSave(`${POL_DIR}/photos/${id}.json`, item);
-        const index = await loadIndex();
-        index.unshift({ id, character: charName, timestamp: meta.timestamp });
-        await saveIndex(index);
-        console.log('[Polaroid] 서버 저장 완료:', id);
-    } else {
-        // ── IndexedDB 폴백 ──
-        const db = await openDB();
-        await new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).add({ id: Date.now() + Math.random(), character: charName, image: base64Image, ...meta });
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
-        });
-        console.log('[Polaroid] IndexedDB 저장 완료');
-    }
-}
-
-async function loadGallery(charName) {
-    if (await checkServerAvailable()) {
-        const index = await loadIndex();
-        const filtered = index.filter(e => e.character === charName);
-        // 사진마다 순서대로 await하면 장수만큼 서버 왕복이 쌓여서 느려지므로 병렬 로드
-        const loaded = await Promise.all(
-            filtered.map(entry => serverLoad(`${POL_DIR}/photos/${entry.id}.json`).catch(() => null))
-        );
-        return loaded.filter(Boolean);
-    } else {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const req = tx.objectStore(STORE_NAME).index('character').getAll(charName);
-            req.onsuccess = () => resolve((req.result || []).sort((a, b) => b.id - a.id));
-            req.onerror = () => reject(req.error);
-        });
-    }
-}
-
-async function deleteFromGallery(charName, id) {
-    if (await checkServerAvailable()) {
-        await serverDelete(`${POL_DIR}/photos/${id}.json`);
-        const index = await loadIndex();
-        await saveIndex(index.filter(e => e.id !== id));
-    } else {
-        const db = await openDB();
-        await new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).delete(id);
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
-        });
-    }
-}
-
-async function allGalleryChars() {
-    if (await checkServerAvailable()) {
-        const index = await loadIndex();
-        const counts = {};
-        index.forEach(e => { counts[e.character] = (counts[e.character] || 0) + 1; });
-        return Object.entries(counts).map(([name, count]) => ({ name, count }));
-    } else {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const req = tx.objectStore(STORE_NAME).getAll();
-            req.onsuccess = () => {
-                const counts = {};
-                (req.result || []).forEach(item => { counts[item.character] = (counts[item.character] || 0) + 1; });
-                resolve(Object.entries(counts).map(([name, count]) => ({ name, count })));
-            };
-            req.onerror = () => reject(req.error);
-        });
-    }
-}
-
-// IndexedDB / localStorage → 서버로 1회 마이그레이션
-async function migrateLocalStorageGallery() {
-    // ① 구버전 localStorage (polaroid_v1_*) 마이그레이션
-    try {
-        const keys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k?.startsWith(GALLERY_PREFIX)) keys.push(k);
-        }
-        if (keys.length) {
-            for (const key of keys) {
-                let arr = [];
-                try { arr = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
-                for (const item of arr) {
-                    if (!item?.image || !item?.character) continue;
-                    await saveToGallery(item.character, item.image, {
-                        timestamp: item.timestamp || new Date().toISOString(),
-                        snippet: item.snippet || '',
-                        prompt: item.prompt || '',
-                    });
-                }
-                localStorage.removeItem(key);
-            }
-            console.log(`[Polaroid] localStorage → 서버 마이그레이션 완료 (${keys.length}개 키)`);
-        }
-    } catch (e) {
-        console.warn('[Polaroid] localStorage 마이그레이션 실패:', e);
-    }
-
-    // ② IndexedDB (PolaroidGallery) 마이그레이션
-    try {
-        const existingIndex = await serverLoad(INDEX_FILE);
-        if (existingIndex && existingIndex.length > 0) return; // 이미 서버에 데이터 있음
-
-        const dbReq = indexedDB.open('PolaroidGallery', 1);
-        await new Promise((resolve) => {
-            dbReq.onsuccess = async () => {
-                try {
-                    const db = dbReq.result;
-                    if (!db.objectStoreNames.contains('photos')) { resolve(); return; }
-                    const tx = db.transaction('photos', 'readonly');
-                    const req = tx.objectStore('photos').getAll();
-                    req.onsuccess = async () => {
-                        const all = req.result || [];
-                        if (!all.length) { resolve(); return; }
-                        for (const item of all) {
-                            if (!item?.image || !item?.character) continue;
-                            await saveToGallery(item.character, item.image, {
-                                timestamp: item.timestamp || new Date().toISOString(),
-                                snippet: item.snippet || '',
-                                prompt: item.prompt || '',
-                            });
-                        }
-                        console.log(`[Polaroid] IndexedDB → 서버 마이그레이션 완료 (${all.length}장)`);
-                        resolve();
-                    };
-                    req.onerror = () => resolve();
-                } catch (err) { resolve(); }
-            };
-            dbReq.onerror = () => resolve();
-            dbReq.onblocked = () => resolve();
-        });
-    } catch (e) {
-        console.warn('[Polaroid] IndexedDB 마이그레이션 실패:', e);
-    }
-}
-
-// ── 생성 전 "한 줄 지시" 팝업 ─────────────────────────────
-// 취소하면 null, 확인하면 문자열(빈 문자열 포함) 반환
-function showDirectionPopup() {
-    return new Promise((resolve) => {
-        if (document.getElementById('pol-direction-popup')) {
-            unlockBodyScroll();
-            document.getElementById('pol-direction-popup')?.remove();
-        }
-
-        const overlay = document.createElement('div');
-        overlay.id = 'pol-direction-popup';
-        overlay.className = 'pol-dir-overlay';
-        overlay.innerHTML = `
-            <div class="pol-dir-box">
-                <div class="pol-dir-title"><i class="fa-solid fa-camera-retro"></i> 📷 Polaroid 생성</div>
-                <div class="pol-dir-desc">원하는 자세나 장면을 한 줄로 지시해주세요.<br><span class="pol-dir-sub">비워두면 채팅 내용만으로 자동 생성합니다.</span></div>
-                <input id="pol-dir-input" class="pol-dir-input" type="text" placeholder="예: 창문 앞에서 뒤돌아보는 모습, 환하게 웃으며 손 흔드는 장면…" maxlength="200" />
-                <div class="pol-dir-btns">
-                    <button id="pol-dir-cancel" class="pol-dir-btn pol-dir-btn-cancel">취소</button>
-                    <button id="pol-dir-ok" class="pol-dir-btn pol-dir-btn-ok"><i class="fa-solid fa-camera-retro"></i> 생성</button>
-                </div>
-            </div>`;
-
-        document.body.appendChild(overlay);
-        lockBodyScroll();
-
-        const input = overlay.querySelector('#pol-dir-input');
-        const btnOk = overlay.querySelector('#pol-dir-ok');
-        const btnCancel = overlay.querySelector('#pol-dir-cancel');
-
-        // 포커스 (모바일에서 키보드 올라오도록)
-        setTimeout(() => { try { input.focus(); } catch(_) {} }, 80);
-
-        const confirm = () => {
-            const val = input.value.trim();
-            unlockBodyScroll();
-            overlay.remove();
-            resolve(val);
-        };
-        const cancel = () => {
-            unlockBodyScroll();
-            overlay.remove();
-            resolve(null);
-        };
-
-        bindTap(btnOk, confirm);
-        bindTap(btnCancel, cancel);
-        input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') confirm();
-            if (e.key === 'Escape') cancel();
-        });
-        bindTap(overlay, e => { if (e.target === overlay) cancel(); });
-    });
-}
-
-// ── 핵심: 버튼 클릭 → 이미지 생성 ────────────────────────
-async function runGenerate(messageText, btn, mesEl) {
-    // 생성 전 방향 지시 팝업
-    const userDirection = await showDirectionPopup();
-    if (userDirection === null) return; // 취소
-
-    btn.disabled = true;
-    const orig = btn.innerHTML;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-
-    try {
-        toastr.info('📷 캐릭터 정보 수집 중...', '', { timeOut: 2000 });
-        const charInfo = await getCharacterInfo();
-
-        // 직전 대화 맥락 수집 (버튼 메시지 포함 최대 6턴)
-        const chatContext = mesEl ? getRecentChatContext(mesEl, 3) : messageText;
-
-        toastr.info('📷 장면 분석 중...', '', { timeOut: 3000 });
-        const imgPrompt = await generatePrompt(messageText, charInfo, userDirection, chatContext);
-        if (!imgPrompt) throw new Error('프롬프트 생성 실패');
-        console.log('[Polaroid] prompt:', imgPrompt);
-
-        toastr.info('📷 이미지 생성 중...', '', { timeOut: 8000 });
-        const imgData = await generateImage(imgPrompt, charInfo);
-
-        const base64Full = `data:${imgData.mimeType};base64,${imgData.data}`;
-        const charName = charInfo.name || 'unknown';
-
-        await saveToGallery(charName, base64Full, {
-            character: charName,
-            timestamp: new Date().toISOString(),
-            snippet: messageText.slice(0, 120),
-            prompt: imgPrompt,
-        });
-
-        showPolaroid(btn, base64Full, charName, imgPrompt);
-        toastr.success('📷 Polaroid 생성 완료!');
-
+        return JSON.parse(localStorage.getItem(BOOKMARK_KEY) || '[]');
     } catch (err) {
-        console.error('[Polaroid]', err);
-        toastr.error(`📷 Polaroid: ${err.message}`);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = orig;
+        console.warn('[chat-searching] 북마크 파싱 실패', err);
+        return [];
     }
 }
 
-// ── 인라인 폴라로이드 표시 ────────────────────────────────
-function showPolaroid(btn, src, charName, prompt) {
-    const mes = btn.closest('.mes');
-    if (!mes) return;
-    mes.querySelector('.polaroid-wrap')?.remove();
-
-    const wrap = document.createElement('div');
-    wrap.className = 'polaroid-wrap';
-    wrap.innerHTML = `
-        <div class="pol-frame">
-            <img src="${src}" class="pol-img" />
-            <div class="pol-name">${charName}</div>
-            <div class="pol-actions">
-                <button class="pol-btn pol-dl" title="저장"><i class="fa-solid fa-download"></i></button>
-                <button class="pol-btn pol-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="pol-hint">${prompt.slice(0, 70)}…</div>
-        </div>`;
-
-    wrap.querySelector('.pol-dl').onclick = () => {
-        const a = document.createElement('a');
-        a.href = src;
-        a.download = `polaroid_${charName}_${Date.now()}.png`;
-        a.click();
-    };
-    wrap.querySelector('.pol-close').onclick = () => wrap.remove();
-
-    // mes_text 다음 또는 mes 블록 끝에 붙임 (ST 1.18 호환)
-    const mesBlock = mes.querySelector('.mes_block') || mes.querySelector('.mes_text')?.parentElement || mes;
-    mesBlock.appendChild(wrap);
+function saveBookmarks(list) {
+    localStorage.setItem(BOOKMARK_KEY, JSON.stringify(list));
 }
 
-// ── 모바일에서 전체화면 오버레이(갤러리/풀뷰어/지시 팝업) 열려있는 동안
-//    배경 스크롤 잠그기 ────────────────────────────────────
-// 모바일 브라우저(특히 iOS Safari)는 채팅창을 스크롤해둔 상태에서
-// position:fixed 오버레이를 새로 붙이면, 오버레이가 뷰포트 정중앙이 아니라
-// "스크롤되기 전 문서 좌표" 기준으로 붙어버려서 화면 위쪽으로 쏠려 보이는 경우가 있음.
-// 오버레이를 여는 동안 body 자체를 fixed로 고정해두면 이 문제가 사라짐.
-// (카운터를 쓰는 이유: 오버레이가 겹쳐 열릴 가능성에 대비해 중첩 lock/unlock 허용)
-let _scrollLockY = 0;
-let _scrollLockCount = 0;
-function lockBodyScroll() {
-    if (_scrollLockCount === 0) {
-        _scrollLockY = window.scrollY || window.pageYOffset || 0;
-        document.body.style.position = 'fixed';
-        document.body.style.top = `-${_scrollLockY}px`;
-        document.body.style.left = '0';
-        document.body.style.right = '0';
-        document.body.style.width = '100%';
-    }
-    _scrollLockCount++;
+function isBookmarked(id) {
+    return loadBookmarks().some((b) => b.id === id);
 }
-function unlockBodyScroll() {
-    _scrollLockCount = Math.max(0, _scrollLockCount - 1);
-    if (_scrollLockCount === 0) {
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-        document.body.style.width = '';
-        window.scrollTo(0, _scrollLockY);
+
+function addBookmark(entry) {
+    const list = loadBookmarks();
+    if (!list.some((b) => b.id === entry.id)) {
+        list.unshift({ ...entry, savedAt: Date.now() });
+        saveBookmarks(list);
     }
 }
 
-// ── 갤러리 모달 (macOS 스타일) ────────────────────────────
-// 모바일(삼성인터넷 등)에서 동적으로 생성된 요소에 click만 걸어두면
-// 터치가 씹히는 경우가 있어서, PointerEvent를 우선 쓰고 없으면 touchend+click을 같이 건다.
-// (touchend에서 preventDefault → 뒤따라오는 합성 click이 취소되므로 중복 실행 안 됨)
-function bindTap(el, handler) {
-    if (!el) return;
-    if (window.PointerEvent) {
-        el.addEventListener('pointerup', handler);
-    } else {
-        el.addEventListener('click', handler);
-        el.addEventListener('touchend', (e) => { e.preventDefault(); handler(e); }, { passive: false });
-    }
+function removeBookmark(id) {
+    saveBookmarks(loadBookmarks().filter((b) => b.id !== id));
 }
 
-function openGallery() {
-    if (document.getElementById('pol-gallery-modal')) {
-        unlockBodyScroll();
-        document.getElementById('pol-gallery-modal')?.remove();
-    }
+// ---------- 검색 로직 ----------
 
-    (async () => {
-    try {
-        const ctx = getContext();
-        const curChar = ctx.characters?.[ctx.characterId]?.name || '';
-        const chars = await allGalleryChars();
+// content 배열(원본 채팅 메시지 배열) 하나를 대상으로 검색해서 매칭된 항목들 리턴
+function matchInContent(content, query, meta) {
+    const matches = [];
+    const lowerQuery = query.toLowerCase();
+    for (let j = 0; j < content.length; j++) {
+        const msg = content[j];
+        if (!msg || typeof msg.mes !== 'string') continue; // 0번 메타데이터 라인 등 스킵
 
-        const modal = document.createElement('div');
-        modal.id = 'pol-gallery-modal';
-        modal.className = 'pol-modal';
-        modal.innerHTML = `
-            <div class="pol-modal-box">
-                <div class="pol-modal-head">
-                    <div class="pol-modal-title">
-                        <i class="fa-solid fa-camera-retro"></i> Polaroid Album
-                    </div>
-                    <select id="pol-char-sel" class="pol-char-select">
-                        <option value="">캐릭터 선택…</option>
-                        ${chars.map(c => `<option value="${c.name}" ${c.name === curChar ? 'selected' : ''}>${c.name} (${c.count})</option>`).join('')}
-                    </select>
-                    <button id="pol-modal-close" class="pol-modal-close-btn" title="닫기"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div id="pol-grid" class="pol-grid"><div class="pol-empty">📷 캐릭터를 선택하세요</div></div>
-            </div>`;
+        const original = msg.mes;
+        // ST 번역 확장은 원문(mes.mes)은 그대로 두고
+        // 번역문을 mes.extra.display_text에 따로 저장해서 화면에만 보여줌.
+        const translated = msg.extra?.display_text;
 
-        document.body.appendChild(modal);
-        lockBodyScroll();
-        const closeModal = () => { unlockBodyScroll(); modal.remove(); };
-        bindTap(modal, e => { if (e.target === modal) closeModal(); });
-        bindTap(modal.querySelector('#pol-modal-close'), closeModal);
+        const matchedOriginal = original.toLowerCase().includes(lowerQuery);
+        const matchedTranslated = typeof translated === 'string' && translated.toLowerCase().includes(lowerQuery);
 
-        const sel = modal.querySelector('#pol-char-sel');
-        sel.onchange = () => renderGrid(modal.querySelector('#pol-grid'), sel.value);
-
-        // 현재 캐릭터가 갤러리에 있으면 바로 표시, 없으면 select 첫 항목으로
-        if (curChar && chars.find(c => c.name === curChar)) {
-            sel.value = curChar;
-            renderGrid(modal.querySelector('#pol-grid'), curChar);
-        } else if (chars.length > 0) {
-            sel.value = chars[0].name;
-            renderGrid(modal.querySelector('#pol-grid'), chars[0].name);
+        if (matchedOriginal || matchedTranslated) {
+            matches.push({
+                ...meta,
+                msgIndex: j,
+                name: msg.name,
+                isUser: msg.is_user,
+                isSystem: msg.is_system,
+                mes: matchedTranslated && !matchedOriginal ? translated : original,
+                matchedTranslated,
+            });
         }
-    } catch (e) {
-        console.error('[Polaroid] 갤러리 열기 실패:', e);
-        toastr.error(`📷 갤러리를 열 수 없습니다: ${e.message}`);
     }
-    })();
+    return matches;
 }
 
-async function renderGrid(gridEl, charName) {
-    if (!charName) { gridEl.innerHTML = '<div class="pol-empty">📷 캐릭터를 선택하세요</div>'; return; }
-    const items = await loadGallery(charName);
-    if (!items.length) { gridEl.innerHTML = '<div class="pol-empty">아직 사진이 없어요 📷</div>'; return; }
+// 현재 열려있는 채팅(메모리 상의 context.chat)만 검색 - 서버 요청 없이 즉시 검색됨
+async function searchCurrentChat(query) {
+    const context = SillyTavern.getContext();
+    const $results = $('#cs-results');
 
-    gridEl.innerHTML = '';
-    items.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'pol-card';
-        card.innerHTML = `
-            <div class="pol-frame pol-frame-sm">
-                <img src="${item.image}" class="pol-img pol-img-thumb" loading="lazy" />
-                <div class="pol-name">${item.character}</div>
-                <div class="pol-date">${new Date(item.timestamp).toLocaleDateString('ko-KR')}</div>
-                <div class="pol-actions">
-                    <button class="pol-btn pol-dl" title="다운로드"><i class="fa-solid fa-download"></i></button>
-                    <button class="pol-btn pol-del" title="삭제"><i class="fa-solid fa-trash"></i></button>
-                </div>
-            </div>`;
+    const charIndex = context.characterId;
+    if (charIndex === undefined || charIndex === null) {
+        $results.html('<div class="cs-empty">캐릭터를 먼저 선택해줘. (그룹챗은 아직 미지원)</div>');
+        return;
+    }
+    const character = context.characters[charIndex];
+    if (!Array.isArray(context.chat) || context.chat.length === 0) {
+        $results.html('<div class="cs-empty">현재 열려있는 채팅이 없어.</div>');
+        return;
+    }
 
-        bindTap(card.querySelector('.pol-img-thumb'), () => openFull(item.image, item.character, item.timestamp));
-        bindTap(card.querySelector('.pol-dl'), () => {
-            const a = document.createElement('a');
-            a.href = item.image;
-            a.download = `polaroid_${item.character}_${item.id}.png`;
-            a.click();
+    const matches = matchInContent(context.chat, query, {
+        fileName: context.chatId || '현재 채팅',
+        avatarUrl: character.avatar,
+        charName: character.name,
+    });
+
+    renderResults($results, matches, query, { showCharBadge: false });
+}
+
+// 캐릭터 한 명의 전체 채팅 파일들을 검색
+async function searchOneCharacterAllChats(query, character, $results, opts = {}) {
+    const avatarUrl = character.avatar;
+    const chName = character.name;
+
+    let chatList;
+    try {
+        chatList = await fetchChatList(avatarUrl);
+    } catch (err) {
+        console.error('[chat-searching] 채팅 목록 실패', err);
+        if (!opts.silentErrors) {
+            $results.html('<div class="cs-empty">채팅 목록을 못 불러왔어. 콘솔(F12) 확인해줘.</div>');
+        }
+        return [];
+    }
+
+    const allMatches = [];
+    for (let i = 0; i < chatList.length; i++) {
+        const fileName = chatList[i].file_name;
+        if (opts.onProgress) opts.onProgress(i + 1, chatList.length, fileName);
+
+        let content;
+        try {
+            content = await fetchChatContent(chName, avatarUrl, fileName);
+        } catch (err) {
+            console.warn(`[chat-searching] ${fileName} 스킵됨`, err);
+            continue;
+        }
+        allMatches.push(...matchInContent(content, query, { fileName, avatarUrl, charName: chName }));
+    }
+    return allMatches;
+}
+
+async function searchCharacterScope(query) {
+    const context = SillyTavern.getContext();
+    const $results = $('#cs-results');
+    const avatarUrl = $('#cs-char-select').val();
+
+    if (!avatarUrl) {
+        $results.html('<div class="cs-empty">캐릭터를 선택해줘.</div>');
+        return;
+    }
+    const character = context.characters.find((c) => c.avatar === avatarUrl);
+    if (!character) {
+        $results.html('<div class="cs-empty">선택한 캐릭터를 찾을 수 없어.</div>');
+        return;
+    }
+
+    $results.html('<div class="cs-loading">채팅 목록 불러오는 중...</div>');
+    const matches = await searchOneCharacterAllChats(query, character, $results, {
+        onProgress: (i, total, fileName) => {
+            $results.html(`<div class="cs-loading">${i}/${total} 채팅 파일 검색 중...<br>(${escapeHtml(fileName)})</div>`);
+        },
+    });
+
+    if (!$results.find('.cs-empty').length) {
+        renderResults($results, matches, query, { showCharBadge: false });
+    }
+}
+
+// 모든 캐릭터의 모든 채팅을 검색 (시간 좀 걸릴 수 있음)
+async function searchAllScope(query) {
+    const context = SillyTavern.getContext();
+    const $results = $('#cs-results');
+    const characters = context.characters || [];
+
+    if (!characters.length) {
+        $results.html('<div class="cs-empty">캐릭터가 없어.</div>');
+        return;
+    }
+
+    const allMatches = [];
+    for (let c = 0; c < characters.length; c++) {
+        const character = characters[c];
+        const found = await searchOneCharacterAllChats(query, character, $results, {
+            silentErrors: true,
+            onProgress: (i, total, fileName) => {
+                $results.html(
+                    `<div class="cs-loading">캐릭터 ${c + 1}/${characters.length} (${escapeHtml(character.name)})<br>` +
+                    `${i}/${total} 파일 검색 중... (${escapeHtml(fileName)})</div>`,
+                );
+            },
         });
-        bindTap(card.querySelector('.pol-del'), async () => {
-            if (confirm('이 사진을 삭제할까요?')) {
-                await deleteFromGallery(charName, item.id);
-                renderGrid(gridEl, charName);
+        allMatches.push(...found);
+    }
+
+    renderResults($results, allMatches, query, { showCharBadge: true });
+}
+
+function currentScope() {
+    return $('.cs-segment button.active').data('scope') || 'character';
+}
+
+async function runSearch(query) {
+    const scope = currentScope();
+    if (scope === 'current') {
+        await searchCurrentChat(query);
+    } else if (scope === 'character') {
+        await searchCharacterScope(query);
+    } else {
+        await searchAllScope(query);
+    }
+}
+
+// ---------- 결과 렌더링 ----------
+
+function renderResults($container, matches, query, opts = {}) {
+    $container.empty();
+    if (!matches || matches.length === 0) {
+        $container.html('<div class="cs-empty">일치하는 결과가 없어.</div>');
+        return;
+    }
+
+    for (const match of matches) {
+        const id = makeBookmarkId(match);
+        const bookmarked = isBookmarked(id);
+        const roleChip = match.isSystem ? '👻 숨김' : (match.isUser ? '🧑 유저' : '🤖 AI');
+        const langChip = match.matchedTranslated ? '<span class="cs-chip">🌐 번역본</span>' : '';
+        const charChip = opts.showCharBadge && match.charName
+            ? `<span class="cs-chip cs-chip-char">${escapeHtml(match.charName)}</span>`
+            : '';
+        const $row = $(`
+            <div class="cs-row">
+                <div class="cs-meta">
+                    ${charChip}
+                    <span class="cs-chip">${escapeHtml(String(match.fileName))}</span>
+                    <span class="cs-chip">${roleChip}</span>
+                    ${langChip}
+                    <span class="cs-name">${escapeHtml(match.name || '')}</span>
+                    <div class="cs-star ${bookmarked ? 'cs-star-on' : ''}" title="북마크">${ICONS.star}</div>
+                </div>
+                <div class="cs-snippet">${highlightSnippet(match.mes, query)}</div>
+                <div class="cs-expand-hint">탭해서 전체 보기</div>
+            </div>
+        `);
+
+        let expanded = false;
+        const $snippet = $row.find('.cs-snippet');
+        const $hint = $row.find('.cs-expand-hint');
+        const $star = $row.find('.cs-star');
+
+        $row.on('click', (e) => {
+            if ($(e.target).closest('.cs-star').length) return; // 별 클릭은 아래에서 따로 처리
+            expanded = !expanded;
+            if (expanded) {
+                $snippet.html(highlightFull(match.mes, query));
+                $hint.text('탭해서 접기');
+            } else {
+                $snippet.html(highlightSnippet(match.mes, query));
+                $hint.text('탭해서 전체 보기');
             }
         });
-        gridEl.appendChild(card);
-    });
-}
 
-function openFull(src, name, timestamp) {
-    if (document.getElementById('pol-full')) {
-        unlockBodyScroll();
-        document.getElementById('pol-full')?.remove();
+        $star.on('click', (e) => {
+            e.stopPropagation();
+            if ($star.hasClass('cs-star-on')) {
+                removeBookmark(id);
+                $star.removeClass('cs-star-on');
+            } else {
+                addBookmark({ id, ...match, query });
+                $star.addClass('cs-star-on');
+            }
+        });
+
+        $container.append($row);
     }
-    const el = document.createElement('div');
-    el.id = 'pol-full';
-    el.className = 'pol-full';
-    const dateStr = timestamp ? new Date(timestamp).toLocaleDateString('ko-KR') : '';
-    el.innerHTML = `
-        <div class="pol-full-inner">
-            <img src="${src}" />
-            <div class="pol-full-info">
-                <strong>${name}</strong>
-                <p>${dateStr}</p>
-            </div>
-            <button class="pol-full-close"><i class="fa-solid fa-xmark"></i></button>
-        </div>`;
-    const closeFull = () => { unlockBodyScroll(); el.remove(); };
-    bindTap(el.querySelector('.pol-full-close'), closeFull);
-    bindTap(el, e => { if (e.target === el) closeFull(); });
-    document.body.appendChild(el);
-    lockBodyScroll();
 }
 
-// ── 메시지 버튼 추가 ──────────────────────────────────────
-// .extraMesButtons 안에 넣되, 아직 없으면 .extraMesButtonsHint 앞(바깥)에 폴백 삽입.
-// 모바일에서 .extraMesButtons가 pointer-events:none이거나 touch를 흡수하는 부모가 있어
-// click이 씹히는 문제를 pointerup + touchend 이중 위임으로 해결.
-function addBtn(mesEl) {
-    if (mesEl.getAttribute('is_user') === 'true' || mesEl.classList.contains('is_user')) return;
-    if (mesEl.querySelector('.pol-msg-btn')) return;
+function renderBookmarksView() {
+    const $view = $('#cs-bookmarks-view');
+    const bookmarks = loadBookmarks();
+    $view.empty();
 
-    const btn = document.createElement('div');
-    btn.className = 'pol-msg-btn';
-    btn.setAttribute('title', '📷 Polaroid');
-    btn.innerHTML = '<i class="fa-solid fa-camera-retro"></i>';
-    // 터치 환경에서 부모가 포인터 이벤트를 먹는 경우 대비: touch-action 명시
-    btn.style.cssText += 'touch-action:manipulation;cursor:pointer;';
-
-    // ① .extraMesButtons 안에 삽입 (Edit 버튼과 나란히)
-    const extraBtns = mesEl.querySelector('.extraMesButtons');
-    if (extraBtns) {
-        extraBtns.appendChild(btn);
+    if (!bookmarks.length) {
+        $view.html('<div class="cs-empty">저장한 북마크가 없어.</div>');
         return;
     }
 
-    // ② 폴백: .extraMesButtonsHint 앞
-    const hint = mesEl.querySelector('.extraMesButtonsHint');
-    if (hint) {
-        hint.insertAdjacentElement('beforebegin', btn);
-        return;
-    }
-
-    // ③ 폴백2: mes_buttons 블록 끝
-    const mesButtons = mesEl.querySelector('.mes_buttons');
-    if (mesButtons) mesButtons.appendChild(btn);
-}
-
-// 버튼별로 잠금 (예전엔 잠금 변수가 전역 하나뿐이라, A 메시지 버튼을 누른 직후
-// 0.6초 안에 B 메시지 버튼을 눌러도 그냥 씹혀버리는 문제가 있었음)
-const _tapLocks = new WeakSet();
-async function handlePolMsgBtnTap(e) {
-    const btn = e.currentTarget || e.target?.closest?.('.pol-msg-btn');
-    if (!btn) return;
-
-    // pointerup + touchend + click이 같은 탭 하나에 대해 중복 실행되는 것만 막기 위한 잠금
-    if (_tapLocks.has(btn)) { e.preventDefault(); e.stopPropagation(); return; }
-    _tapLocks.add(btn);
-    setTimeout(() => _tapLocks.delete(btn), 600);
-
-    e.stopImmediatePropagation();
-    e.stopPropagation();
-    e.preventDefault();
-
-    const mesEl = btn.closest('.mes');
-    if (!mesEl) return;
-    const text = mesEl.querySelector('.mes_text')?.innerText?.trim() || '';
-    await runGenerate(text, btn, mesEl);
-}
-
-// pointerup: 모던 브라우저 / 삼성인터넷 등 PointerEvent 지원 환경
-$(document).on('pointerup', '.pol-msg-btn', handlePolMsgBtnTap);
-// touchend: PointerEvent 없는 구형 환경 + iOS Safari 특정 버전 대비
-$(document).on('touchend', '.pol-msg-btn', handlePolMsgBtnTap);
-// click: 데스크톱 폴백
-$(document).on('click', '.pol-msg-btn', handlePolMsgBtnTap);
-
-function addBtnsAll() {
-    document.querySelectorAll('.mes').forEach(addBtn);
-}
-
-// ── 설정 패널 ─────────────────────────────────────────────
-async function setupSettings() {
-    const c = cfg();
-    const isDirect = c.api_mode !== 'profile';
-
-    const imgModelOpts = IMAGE_MODELS.map(m =>
-        `<option value="${m.value}" ${c.image_model === m.value ? 'selected' : ''}>${m.label}</option>`
-    ).join('');
-
-    const txtModelOpts = PROMPT_MODELS.map(m =>
-        `<option value="${m.value}" ${c.prompt_model === m.value ? 'selected' : ''}>${m.label}</option>`
-    ).join('');
-
-    const html = `
-        <div id="pol-settings-panel" class="extension_block">
-            <div class="inline-drawer">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>📷 Polaroid</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    for (const b of bookmarks) {
+        const roleChip = b.isSystem ? '👻 숨김' : (b.isUser ? '🧑 유저' : '🤖 AI');
+        const charChip = b.charName ? `<span class="cs-chip cs-chip-char">${escapeHtml(b.charName)}</span>` : '';
+        const $row = $(`
+            <div class="cs-row">
+                <div class="cs-meta">
+                    ${charChip}
+                    <span class="cs-chip">${escapeHtml(String(b.fileName))}</span>
+                    <span class="cs-chip">${roleChip}</span>
+                    <span class="cs-name">${escapeHtml(b.name || '')}</span>
+                    <div class="cs-star cs-star-on" title="북마크 해제">${ICONS.star}</div>
                 </div>
-                <div class="inline-drawer-content">
-                    <div class="pol-settings">
+                <div class="cs-snippet">${b.query ? highlightSnippet(b.mes, b.query) : escapeHtml(b.mes.slice(0, 160))}</div>
+                <div class="cs-expand-hint">탭해서 전체 보기</div>
+            </div>
+        `);
 
-                        <label>API 연결 방식</label>
-                        <select id="pol-api-mode" class="text_pole">
-                            <option value="profile" ${!isDirect ? 'selected' : ''}>ST 연결 프로필 사용</option>
-                            <option value="direct"  ${isDirect  ? 'selected' : ''}>직접 API 키 입력</option>
-                        </select>
+        let expanded = false;
+        const $snippet = $row.find('.cs-snippet');
+        const $hint = $row.find('.cs-expand-hint');
+        const $star = $row.find('.cs-star');
 
-                        <div id="pol-profile-info" style="display:${isDirect ? 'none' : 'block'};margin-top:4px;">
-                            <label style="margin-top:6px;">연결 프로필</label>
-                            <select id="pol-profile-select" class="text_pole">
-                                <option value="">-- 프로필 선택 --</option>
-                            </select>
-                            <small id="pol-profile-model-info" style="color:#aaa;font-size:11px;margin-top:3px;display:block;">
-                                프로필을 선택하면 모델이 자동으로 설정됩니다.
-                            </small>
+        $row.on('click', (e) => {
+            if ($(e.target).closest('.cs-star').length) return;
+            expanded = !expanded;
+            if (expanded) {
+                $snippet.html(b.query ? highlightFull(b.mes, b.query) : escapeHtml(b.mes));
+                $hint.text('탭해서 접기');
+            } else {
+                $snippet.html(b.query ? highlightSnippet(b.mes, b.query) : escapeHtml(b.mes.slice(0, 160)));
+                $hint.text('탭해서 전체 보기');
+            }
+        });
 
-                            <label style="margin-top:6px;">프로필 키 종류</label>
-                            <select id="pol-profile-provider" class="text_pole">
-                                <option value="aistudio" ${c.profile_provider !== 'vertex' ? 'selected' : ''}>Google AI Studio 키 (AIza..., 대부분 이거)</option>
-                                <option value="vertex" ${c.profile_provider === 'vertex' ? 'selected' : ''}>Vertex AI Express 키</option>
-                            </select>
+        $star.on('click', (e) => {
+            e.stopPropagation();
+            removeBookmark(b.id);
+            $row.remove();
+            if (!loadBookmarks().length) {
+                $view.html('<div class="cs-empty">저장한 북마크가 없어.</div>');
+            }
+        });
 
-                            <div id="pol-profile-vertex-fields" style="display:${c.profile_provider === 'vertex' ? 'flex' : 'none'};flex-direction:column;gap:7px;margin-top:4px;">
-                                <label>Project ID</label>
-                                <input type="text" id="pol-profile-project" class="text_pole" value="${c.project_id || ''}" placeholder="your-project-id" />
-                                <label>Region</label>
-                                <input type="text" id="pol-profile-region" class="text_pole" value="${c.region || 'global'}" placeholder="global 또는 us-central1" />
-                            </div>
+        $view.append($row);
+    }
+}
 
-                            <small style="color:#8fae8f;font-size:11px;margin-top:4px;display:block;line-height:1.5;">
-                                ✓ polaroid-proxy 서버 플러그인이 설치되어 있으면, 이 프로필에 연결된 키로
-                                장면 분석 + 이미지 생성까지 전부 처리됩니다. 키를 직접 입력할 필요 없음.
-                                (서버 플러그인 미설치 시 아래 "직접 API 키 입력" 모드를 쓰세요.)
-                            </small>
-                        </div>
+// ---------- UI ----------
 
-                        <div id="pol-direct-fields" style="display:${isDirect ? 'flex' : 'none'};flex-direction:column;gap:7px;margin-top:4px;">
-                            <label>API Key</label>
-                            <input type="password" id="pol-direct-key" class="text_pole" placeholder="Vertex AI Express API Key" value="${c.direct_api_key || ''}" />
-                            <label>Project ID</label>
-                            <input type="text" id="pol-direct-project" class="text_pole" value="${c.direct_project_id || ''}" placeholder="your-project-id" />
-                            <label>Region</label>
-                            <input type="text" id="pol-direct-region" class="text_pole" value="${c.direct_region || 'global'}" placeholder="global 또는 us-central1" />
-                        </div>
+function populateCharacterSelect() {
+    const context = SillyTavern.getContext();
+    const $select = $('#cs-char-select');
+    const characters = (context.characters || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 
-                        <label style="margin-top:6px;">이미지 생성 모델</label>
-                        <select id="pol-img-model" class="text_pole">${imgModelOpts}</select>
+    $select.empty();
+    for (const c of characters) {
+        $select.append(`<option value="${escapeHtml(c.avatar)}">${escapeHtml(c.name)}</option>`);
+    }
 
-                        <label>이미지 스타일</label>
-                        <input type="text" id="pol-style" class="text_pole" value="${c.image_style}" />
-                        <label>네거티브 프롬프트</label>
-                        <input type="text" id="pol-neg" class="text_pole" value="${c.negative_prompt}" />
+    // 현재 활성 캐릭터가 있으면 기본 선택값으로 지정 (기존 동작과 호환)
+    if (context.characterId !== undefined && context.characterId !== null) {
+        const current = context.characters[context.characterId];
+        if (current) $select.val(current.avatar);
+    }
+}
 
-                        <div style="display:flex;gap:8px;margin-top:8px;">
-                            <button id="pol-save-btn" class="menu_button menu_button_active">
-                                <i class="fa-solid fa-floppy-disk"></i> 저장
-                            </button>
-                            <button id="pol-gallery-open-btn" class="menu_button">
-                                <i class="fa-solid fa-images"></i> 갤러리 열기
-                            </button>
-                        </div>
+function updateScopeUI() {
+    if (currentScope() === 'character') {
+        $('#cs-char-select-wrap').show();
+    } else {
+        $('#cs-char-select-wrap').hide();
+    }
+}
+
+function buildUI() {
+    const modalHtml = `
+        <div id="cs-modal" class="cs-modal" style="display:none;">
+            <div class="cs-panel">
+                <div class="cs-header">
+                    <div class="cs-title">
+                        <span class="cs-eyebrow">CHAT SEARCHING</span>
+                        <span class="cs-title-main">채팅 검색</span>
+                    </div>
+                    <div class="cs-header-actions">
+                        <div id="cs-theme-btn" class="cs-icon-btn" title="테마 전환"></div>
+                        <div id="cs-bookmarks-btn" class="cs-icon-btn" title="북마크 보기">${ICONS.bookmark}</div>
+                        <div id="cs-close" class="cs-icon-btn" title="닫기">${ICONS.close}</div>
                     </div>
                 </div>
+
+                <div class="cs-scope-bar">
+                    <div class="cs-segment">
+                        <button data-scope="current">현재 채팅</button>
+                        <button data-scope="character" class="active">캐릭터 전체</button>
+                        <button data-scope="all">모든 캐릭터</button>
+                    </div>
+                    <div id="cs-char-select-wrap" class="cs-char-select-wrap">
+                        ${ICONS.user}
+                        <select id="cs-char-select"></select>
+                    </div>
+                </div>
+
+                <div class="cs-searchbar">
+                    <div class="cs-input-wrap">
+                        ${ICONS.search}
+                        <input id="cs-input" type="text" placeholder="검색어 입력..." />
+                    </div>
+                    <button id="cs-search-btn" class="menu_button">검색</button>
+                </div>
+
+                <hr class="cs-divider">
+
+                <div id="cs-results" class="cs-results"></div>
+                <div id="cs-bookmarks-view" class="cs-results" style="display:none;"></div>
             </div>
-        </div>`;
+        </div>
+    `;
 
-    // ST 버전별 설정 패널 ID 대응
-    const $settingsContainer = $('#extensions_settings2').length
-        ? $('#extensions_settings2')
-        : $('#extensions_settings');
-    $settingsContainer.append(html);
+    // body가 아니라 html 바로 아래에 붙임.
+    // ST가 모바일에서 body(또는 그 안의 래퍼)에 transform/zoom을 걸어두면
+    // position:fixed 요소가 "화면"이 아니라 그 transform된 박스 기준으로
+    // 위치가 계산돼서 옆으로 밀려 보이는 문제가 생김.
+    // html 바로 아래(= body의 형제)에 붙이면 그 영향권에서 벗어남.
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = modalHtml.trim();
+    const modalEl = wrapper.firstElementChild;
+    document.documentElement.appendChild(modalEl);
 
-    // 프로필 드롭다운 채우기
-    try {
-        const svc = SillyTavern.getContext().ConnectionManagerRequestService;
-        const profiles = svc.getSupportedProfiles();
-        const $sel = $('#pol-profile-select');
-        profiles.forEach(p => {
-            const selected = p.id === c.profile_id ? 'selected' : '';
-            $sel.append(`<option value="${p.id}" ${selected}>${p.name} (${p.model})</option>`);
-        });
-        const cur = profiles.find(p => p.id === c.profile_id);
-        if (cur) $('#pol-profile-model-info').text('모델: ' + cur.model);
-        $sel.on('change', function() {
-            const sel = profiles.find(p => p.id === $(this).val());
-            if (sel) $('#pol-profile-model-info').text('모델: ' + sel.model);
-        });
-    } catch(e) {
-        $('#pol-profile-model-info').text('프로필 목록을 불러올 수 없습니다.');
-    }
+    applyTheme(getSavedTheme());
 
-    $('#pol-api-mode').on('change', function () {
-        const v = $(this).val();
-        $('#pol-profile-info').toggle(v === 'profile');
-        $('#pol-direct-fields').toggle(v === 'direct');
+    $('#cs-close').on('click', () => closeModal());
+    $('#cs-theme-btn').on('click', () => toggleTheme());
+    $('#cs-search-btn').on('click', () => {
+        const query = ($('#cs-input').val() || '').trim();
+        if (query) runSearch(query);
+    });
+    $('#cs-input').on('keydown', (e) => {
+        if (e.key === 'Enter') $('#cs-search-btn').trigger('click');
     });
 
-    $('#pol-profile-provider').on('change', function () {
-        $('#pol-profile-vertex-fields').toggle($(this).val() === 'vertex');
+    $('.cs-segment button').on('click', function () {
+        $('.cs-segment button').removeClass('active');
+        $(this).addClass('active');
+        updateScopeUI();
     });
 
-    $('#pol-save-btn').on('click', () => {
-        const vals = {
-            api_mode:          $('#pol-api-mode').val(),
-            profile_id:        $('#pol-profile-select').val() || '',
-            profile_provider:  $('#pol-profile-provider').val() || 'aistudio',
-            project_id:        ($('#pol-profile-project').val() || '').trim(),
-            region:            ($('#pol-profile-region').val() || 'global').trim(),
-            direct_api_key:    ($('#pol-direct-key').val() || '').trim(),
-            direct_project_id: ($('#pol-direct-project').val() || '').trim(),
-            direct_region:     ($('#pol-direct-region').val() || 'global').trim(),
-            image_model:       $('#pol-img-model').val(),
-            image_style:       ($('#pol-style').val() || '').trim(),
-            negative_prompt:   ($('#pol-neg').val() || '').trim(),
-        };
-        // import된 extension_settings에 저장
-        if (!extension_settings[EXT]) extension_settings[EXT] = {};
-        Object.assign(extension_settings[EXT], vals);
-        // getContext().extensionSettings에도 동기화
-        const ctx = getContext();
-        if (ctx.extensionSettings) {
-            if (!ctx.extensionSettings[EXT]) ctx.extensionSettings[EXT] = {};
-            Object.assign(ctx.extensionSettings[EXT], vals);
-        }
-        saveSettingsDebounced();
-        toastr.success('Polaroid 설정 저장됨 ✓');
-        console.log('[Polaroid] 설정 저장:', vals);
-    });
-
-    $('#pol-gallery-open-btn').on('click', openGallery);
-}
-
-// ── Wand 메뉴에 항목 주입 ─────────────────────────────────
-function injectWandMenu() {
-    // ST의 wand 메뉴 #extensionsMenu li 리스트 안에 추가
-    // 메뉴가 열릴 때마다 재렌더되는 경우가 있으므로 MutationObserver 사용
-    const injectItem = () => {
-        const menu = document.getElementById('extensionsMenu');
-        if (!menu) return false;
-        if (menu.querySelector('#pol-wand-item')) return true;
-
-        const li = document.createElement('li');
-        li.id = 'pol-wand-item';
-        li.innerHTML = `<i class="fa-solid fa-camera-retro"></i> Polaroid`;
-        li.style.cssText = 'cursor:pointer; padding: 5px 16px; display:flex; align-items:center; gap:8px;';
-        bindTap(li, (e) => {
-            e.stopPropagation();
-            // 메뉴 닫기
-            document.getElementById('extensionsMenu')?.classList.remove('open');
-            openGallery();
-        });
-
-        // 메뉴 첫 항목 앞에 삽입
-        const firstItem = menu.querySelector('li');
-        if (firstItem) {
-            menu.insertBefore(li, firstItem);
+    $('#cs-bookmarks-btn').on('click', () => {
+        const showingBookmarks = $('#cs-bookmarks-view').is(':visible');
+        if (showingBookmarks) {
+            $('#cs-bookmarks-view').hide();
+            $('#cs-results').show();
+            $('.cs-scope-bar, .cs-searchbar, .cs-divider').show();
+            $('#cs-bookmarks-btn').removeClass('cs-icon-btn-active');
         } else {
-            menu.appendChild(li);
-        }
-        return true;
-    };
-
-    // 최초 시도 (이 시점엔 #extensionsMenu가 아직 DOM에 없을 수 있음 — 그래도 일단 시도)
-    injectItem();
-
-    // ── 모바일 터치 안 되는 문제의 원인: #extensionsMenu/#extensionsMenuButton가
-    //    init 시점에 DOM에 없으면 기존 코드는 옵저버/리스너 등록 자체를 건너뛰어서
-    //    그 뒤로 영영 재시도할 방법이 없어짐 (느린 로딩 환경, 특히 모바일에서 잘 걸림)
-    //    → document.body 전체를 감시해서 #extensionsMenu가 "나중에" 생기는 것도 잡아냄
-    const bodyObserver = new MutationObserver(() => injectItem());
-    bodyObserver.observe(document.body, { childList: true, subtree: true });
-
-    // wand 버튼 클릭 시 메뉴가 열릴 때 재주입 (버튼이 init 시점에 없어도 동작하도록 document에 위임)
-    document.addEventListener('click', (e) => {
-        if (e.target?.closest?.('#extensionsMenuButton')) {
-            setTimeout(injectItem, 50);
+            renderBookmarksView();
+            $('#cs-results').hide();
+            $('.cs-scope-bar, .cs-searchbar, .cs-divider').hide();
+            $('#cs-bookmarks-view').show();
+            $('#cs-bookmarks-btn').addClass('cs-icon-btn-active');
         }
     });
 
-    // 안전망: 초기 로딩이 유난히 느린 경우 대비 10초간 폴링 후 정리
-    let tries = 0;
-    const pollId = setInterval(() => {
-        tries++;
-        if (injectItem() || tries > 20) clearInterval(pollId);
-    }, 500);
+    // 확장 메뉴(퍼즐 아이콘 드롭다운)에 진입 버튼 추가
+    const entryHtml = `
+        <div id="cs-entry" class="list-group-item flex-container flexGap5 interactable" tabindex="0">
+            <div class="fa-solid fa-magnifying-glass"></div>
+            <span>Chat Searching</span>
+        </div>
+    `;
+    $('#extensionsMenu').append(entryHtml);
+    $('#cs-entry').on('click', () => {
+        openModal();
+    });
 }
 
-// ── style.css를 fetch로 못 가져왔을 때만 쓰는 최소 안전장치 ─────
-// (injectStyles()의 catch에서만 호출됨. 예전엔 <link> 태그가 실제로 로드됐는지를
-//  매번 폴링해서 "로드 안 됨"으로 잘못 판정하고 이 폴백을 계속 겹쳐 주입하던 버그가
-//  있었는데, 지금은 fetch 실패라는 확실한 신호가 있을 때만 호출됨)
-function ensureFallbackStyles() {
-    try {
-        if (document.getElementById('pol-fallback-css')) return;
-        const style = document.createElement('style');
-        style.id = 'pol-fallback-css';
-        style.textContent = `
-.pol-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;}
-.pol-modal-box{background:#fafaf8;color:#2c2c2c;border-radius:16px;max-width:920px;width:100%;max-height:90vh;max-height:90dvh;display:flex;flex-direction:column;overflow:hidden;}
-.pol-modal-head{display:flex;align-items:center;gap:10px;padding:14px 18px;background:#fff;border-bottom:1px solid #e8e5df;}
-.pol-modal-close-btn{width:32px;height:32px;border-radius:50%;border:none;background:#f0ede7;color:#666;cursor:pointer;display:flex;align-items:center;justify-content:center;}
-.pol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px;padding:16px;overflow-y:auto;flex:1;}
-.pol-full{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;}
-.polaroid-wrap{display:flex;justify-content:center;margin-top:14px;}
-.pol-frame,.pol-frame-sm{background:#fff;color:#222;padding:10px 10px 36px;max-width:260px;width:100%;}
-.pol-msg-btn{cursor:pointer;touch-action:manipulation;}
-.pol-dir-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;}
-.pol-dir-box{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;}
-`;
-        document.head.appendChild(style);
-    } catch (e) {
-        console.error('[Polaroid] 폴백 스타일 체크 실패:', e);
-    }
+function openModal() {
+    // 배경 스크롤 잠그기 (모바일에서 팝업 열릴 때 화면 밀리는 현상 방지)
+    $('body').css('overflow', 'hidden');
+
+    // 열 때마다 캐릭터 목록/기본 선택 최신화 + 북마크 보기는 닫고 검색 화면으로 리셋
+    populateCharacterSelect();
+    updateScopeUI();
+    $('#cs-bookmarks-view').hide();
+    $('#cs-results').show();
+    $('.cs-scope-bar, .cs-searchbar, .cs-divider').show();
+    $('#cs-bookmarks-btn').removeClass('cs-icon-btn-active');
+
+    $('#cs-modal').show();
+    // 자동 포커스는 일부러 안 함 -> 열리자마자 키보드가 뜨면서
+    // 모바일 뷰포트가 줄어들어 레이아웃이 밀리는 문제가 있었음
 }
-// ── 초기화 ────────────────────────────────────────────────
+
+function closeModal() {
+    $('#cs-modal').hide();
+    $('body').css('overflow', '');
+}
+
 jQuery(async () => {
-    await injectStyles();
-    const ctx = getContext();
-    if (ctx.extensionSettings) {
-        if (!ctx.extensionSettings[EXT]) ctx.extensionSettings[EXT] = {};
-        ctx.extensionSettings[EXT] = Object.assign({}, DEFAULTS, ctx.extensionSettings[EXT]);
-    }
-    // fallback: import된 extension_settings도 초기화
-    if (!extension_settings[EXT]) extension_settings[EXT] = {};
-    extension_settings[EXT] = Object.assign({}, DEFAULTS, extension_settings[EXT]);
-
-    await migrateLocalStorageGallery();
-    await setupSettings();
-    injectWandMenu();
-
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, mesId => {
-        const el = document.querySelector(`.mes[mesid="${mesId}"]`);
-        if (el) addBtn(el);
-    });
-
-    eventSource.on(event_types.CHAT_CHANGED, () => {
-        setTimeout(addBtnsAll, 300);
-    });
-
-    addBtnsAll();
-    console.log('[Polaroid] 📷 로드 완료');
+    buildUI();
+    console.log('[chat-searching] 로드됨 (v3: 새 디자인 + 다크/라이트 테마 토글)');
 });
