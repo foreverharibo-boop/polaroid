@@ -403,10 +403,10 @@ function extractFaceDescription(description) {
     const faceKeywords = /\bhair\b|eye|skin|face|nose|mouth|lip|chin|jaw|cheek|brow|forehead|complexion|pupil|lash|freckle|pale|dark|tan|blond|brunette|redhead|silver|white hair|black hair|blue eye|green eye|brown eye|gray eye|눈|머리|피부|얼굴|코|입|턱|이목구비|눈썹|속눈썹|주근깨|창백|금발|흑발|은발/i;
     return description.split(/[.。\n]+/)
         .filter(l => faceKeywords.test(l) && l.trim().length > 8)
-        .slice(0, 4)
+        .slice(0, 30)
         .join('. ')
         .trim()
-        .slice(0, 400);
+        .slice(0, 5000);
 }
 
 // ── 신체/체형 관련 문장만 추출 (텍스트 디스크립션에서 키·체중·문신 등 뽑기) ──
@@ -417,10 +417,10 @@ function extractBodyDescription(description) {
     const bodyKeywords = /height|tall|short|weight|build|slim|thin|thick|muscle|athletic|curvy|tattoo|scar|piercing|chest|waist|hip|leg|arm|shoulder|stomach|abs|키|몸무게|문신|흉터|피어싱|체형|근육|허리|가슴|다리|팔|어깨|복근|날씬|마른|통통|뚱|체중|신장/i;
     return description.split(/[.。\n]+/)
         .filter(l => bodyKeywords.test(l) && l.trim().length > 8)
-        .slice(0, 5)
+        .slice(0, 30)
         .join('. ')
         .trim()
-        .slice(0, 400);
+        .slice(0, 5000);
 }
 
 async function generateImage(imagePrompt, charInfo) {
