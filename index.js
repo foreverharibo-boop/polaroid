@@ -1026,7 +1026,7 @@ async function runGenerate(messageText, btn, mesEl) {
         const charInfo = await getCharacterInfo();
 
         // 직전 대화 맥락 수집 (버튼 메시지 포함 최대 6턴)
-        const chatContext = mesEl ? getRecentChatContext(mesEl, 10) : messageText;
+        const chatContext = mesEl ? getRecentChatContext(mesEl, 6) : messageText;
 
         toastr.info('📷 장면 분석 중...', '', { timeOut: 3000 });
         const imgPrompt = await generatePrompt(messageText, charInfo, userDirection, chatContext);
