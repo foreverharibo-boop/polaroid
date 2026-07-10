@@ -77,8 +77,8 @@ const DEFAULTS = {
     direct_region: 'global',
     image_model: 'gemini-3.1-flash-image',
     prompt_model: 'gemini-3.5-flash',
-    image_style: 'cinematic photo, high quality, detailed lighting',
-    negative_prompt: 'blurry, low quality, distorted, text, watermark',
+    image_style: 'shot on iPhone, candid photo, casual selfie aesthetic, natural ambient lighting, slight film grain, authentic skin texture with visible pores, imperfect asymmetric framing, unposed candid moment, soft window light or golden hour light, realistic depth of field, sharp jawline, defined bone structure, clear healthy skin, effortlessly styled hair, confident relaxed expression, striking eyes, model-like facial proportions, attractive masculine features, good lighting on face highlighting bone structure',
+    negative_prompt: 'overly smooth skin, airbrushed, plastic skin, symmetric studio lighting, posed stiff smile, generic AI face, waxy skin, over-sharpened, distorted, text, watermark',
 };
 
 function getExtSettings() {
