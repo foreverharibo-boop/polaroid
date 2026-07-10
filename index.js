@@ -252,7 +252,7 @@ async function summarizeSceneCore(sceneText, chatContext, promptModel) {
     console.log('[Polaroid] chatContext 길이/내용:', chatContext?.length, chatContext?.slice(0, 300));
     // 오래된 대화부터 잘리지 않도록 "뒤(최근)"에서부터 잘라서 사용 (2만자)
     const ctx = (chatContext || sceneText);
-    const recentCtx = ctx.length > 20000 ? '...' + ctx.slice(-20000) : ctx;
+    const recentCtx = ctx.length > 100000 ? '...' + ctx.slice(-100000) : ctx;
 
     const summaryPrompt = `Below is a roleplay chat (oldest to newest). Focus ONLY on the LAST message — that is the current moment to capture.
 Summarize the CURRENT physical scene in ONE short sentence (under 25 words).
@@ -263,7 +263,7 @@ CHAT (oldest → newest):
 ${recentCtx}
 
 THE LAST MESSAGE IS THE SCENE TO CAPTURE:
-${sceneText.slice(0, 5000)}
+${sceneText.slice(0, 10000)}
 
 Return ONLY the one-sentence summary. No explanation.`;
 
