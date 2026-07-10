@@ -394,21 +394,60 @@ Return ONLY the scene description. No explanation, no style tags.`;
 }
 
 // ── 이미지 생성 ────────────────────────────────────────────
+// ── 외형 관련 문장 자동 추출 ──────────────────────────────────────
+// 캐릭터 설명에서 얼굴/신체 외형 관련 문장만 뽑아서 텍스트 참조로 추가한다.
+// 이미지 참조 하나만으론 모델이 디테일을 놓치는 경우가 있어서, 텍스트로도 재확인시킴.
+function extractPhysicalDescription(description) {
+    if (!description) return '';
+    const physicalKeywords = /hair|eye|skin|face|height|build|body|nose|mouth|lip|chin|jaw|cheek|brow|forehead|complexion|slim|thin|muscle|tall|short|pupil|lash|freckle|pale|dark|tan|blond|brunette|redhead|silver|white hair|black hair|blue eye|green eye|brown eye|gray eye|색|눈|머리|피부|얼굴|키|몸|코|입|턱|이목구비|눈썹|속눈썹|주근깨|창백|피|금발|흑발|은발/i;
+    return description.split(/[.。\n]+/)
+        .filter(l => physicalKeywords.test(l) && l.trim().length > 8)
+        .slice(0, 6)
+        .join('. ')
+        .trim()
+        .slice(0, 500);
+}
+
 async function generateImage(imagePrompt, charInfo) {
     const c = cfg();
     const parts = [];
 
-    if (charInfo.avatarBase64) {
-        parts.push({ text: `CRITICAL REFERENCE IMAGE of ${charInfo.name || 'the character'}. This shows their EXACT true face — same face shape, eyes, eye color, nose, mouth, skin tone, hair color and hairstyle MUST be replicated precisely in the generated image, with zero deviation. Study this face carefully before drawing. USE ONLY for face/hair/body type — do NOT copy this reference's clothing, pose, expression, background, or situation; the scene text below overrides all of that.` });
+    const hasCharRef = !!charInfo.avatarBase64;
+    const hasPersonaRef = !!charInfo.personaAvatarBase64;
+
+    // ── 이미지를 "먼저" 보낸 뒤 설명 — Gemini는 이미지→텍스트 순서일 때 참조를 훨씬 잘 따름
+    if (hasCharRef) {
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.avatarBase64 } });
-    }
-    if (charInfo.personaAvatarBase64) {
-        parts.push({ text: `CRITICAL REFERENCE IMAGE of user persona ${charInfo.personaName || ''}. This shows their EXACT true face — same face shape, eyes, eye color, nose, mouth, skin tone, hair color and hairstyle MUST be replicated precisely, with zero deviation. USE ONLY for face/hair/body type — do NOT copy this reference's clothing, pose, or background.` });
-        parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
+        parts.push({ text: `↑ THIS IS THE CHARACTER FACE REFERENCE FOR "${charInfo.name || 'the character'}". Treat this as a photograph of the real person. Memorize and lock in: exact eye shape, eye color, iris pattern, nose bridge width, nose tip, lip shape, chin shape, jawline, cheekbones, skin tone, skin texture, hair color, hair texture, hairline, ear shape. You MUST reproduce this exact face — same individual, different situation. Any deviation from this face = failure.` });
     }
 
-    const finalPrompt = `The reference image(s) above show the REAL faces that MUST appear in the output — match face shape, eyes, hair, and skin tone exactly, as if it's the same person photographed in a new scene. IGNORE only the reference's clothing, pose, background, and situation. Generate exactly the following scene:\n\n${imagePrompt}` + (c.negative_prompt ? `\n\nDo NOT include: ${c.negative_prompt}` : '') + `\n\nReminder: face/hair/skin tone must match the reference image(s) precisely.`;
-    parts.push({ text: finalPrompt });
+    if (hasPersonaRef) {
+        parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
+        parts.push({ text: `↑ THIS IS THE USER PERSONA FACE REFERENCE${charInfo.personaName ? ` FOR "${charInfo.personaName}"` : ''}. Same rule: memorize and lock in this person's face — eye shape, eye color, nose, mouth, skin tone, hair color and texture. When this person appears in the scene, reproduce this exact face.` });
+    }
+
+    // ── 캐릭터 설명에서 외형 문장만 뽑아 텍스트로도 보강 (이미지 참조 혼자 놓치는 디테일 보완)
+    const physicalDesc = extractPhysicalDescription(charInfo.description);
+    if (physicalDesc && hasCharRef) {
+        parts.push({ text: `Additional confirmed physical traits of ${charInfo.name || 'the character'} (use as secondary check against the reference image above — the image takes priority): ${physicalDesc}` });
+    }
+    if (charInfo.personaDescription && hasPersonaRef) {
+        const personaPhysical = extractPhysicalDescription(charInfo.personaDescription);
+        if (personaPhysical) {
+            parts.push({ text: `Additional confirmed physical traits of persona ${charInfo.personaName || ''}: ${personaPhysical}` });
+        }
+    }
+
+    // ── 장면 생성 지시 — 얼굴 일관성 규칙을 앞뒤에서 샌드위치처럼 강조
+    const faceRule = (hasCharRef || hasPersonaRef)
+        ? `⚠ FACE CONSISTENCY RULE (non-negotiable): The face(s) in your output must be the SAME individual(s) as shown in the reference image(s) above. Do NOT generalize, idealize, or re-invent the face. Do NOT drift toward a "generic pretty face". The viewer must be able to look at the output and recognize it as the same person from the reference photo. Same eyes. Same nose. Same mouth. Same jawline. Same hair.\n\n`
+        : '';
+
+    const finalCheck = (hasCharRef || hasPersonaRef)
+        ? `\n\n⚠ Before finalizing output: does the face in the image match the reference? Same eye shape? Same nose? Same mouth? Same hair color and texture? If not, correct it.`
+        : '';
+
+    parts.push({ text: faceRule + `Generate this scene:\n\n${imagePrompt}` + (c.negative_prompt ? `\n\nDo NOT include: ${c.negative_prompt}` : '') + finalCheck });
 
     const data = await apiPost(c.image_model, {
         contents: [{ role: 'user', parts }],
