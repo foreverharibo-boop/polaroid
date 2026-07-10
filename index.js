@@ -418,12 +418,12 @@ async function generateImage(imagePrompt, charInfo) {
     // ── 이미지를 "먼저" 보낸 뒤 설명 — Gemini는 이미지→텍스트 순서일 때 참조를 훨씬 잘 따름
     if (hasCharRef) {
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.avatarBase64 } });
-        parts.push({ text: `↑ THIS IS THE CHARACTER FACE REFERENCE FOR "${charInfo.name || 'the character'}". Treat this as a photograph of the real person. Memorize and lock in: exact eye shape, eye color, iris pattern, nose bridge width, nose tip, lip shape, chin shape, jawline, cheekbones, skin tone, skin texture, hair color, hair texture, hairline, ear shape. You MUST reproduce this exact face — same individual, different situation. Any deviation from this face = failure.` });
+        parts.push({ text: `↑ IDENTITY-LOCKED FACE REFERENCE: "${charInfo.name || 'the character'}". This is a photograph of a specific real individual. You are NOT creating a new character — you are depicting THIS EXACT PERSON in a different situation. Lock in and reproduce without any change: eye shape and color (iris pattern, pupil), eyelid fold, brow shape and arch, nose bridge width and tip shape, philtrum, lip shape (upper bow and lower lip volume), chin contour, jawline angle, cheekbone position, ear shape, hairline, hair color (exact hue and tone — not approximate), hair texture and curl pattern, skin tone. ANY deviation — smoother skin, different eye shape, altered nose, different jaw, different hair — is a critical failure. Same face, different scene.` });
     }
 
     if (hasPersonaRef) {
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
-        parts.push({ text: `↑ THIS IS THE USER PERSONA FACE REFERENCE${charInfo.personaName ? ` FOR "${charInfo.personaName}"` : ''}. Same rule: memorize and lock in this person's face — eye shape, eye color, nose, mouth, skin tone, hair color and texture. When this person appears in the scene, reproduce this exact face.` });
+        parts.push({ text: `↑ IDENTITY-LOCKED FACE REFERENCE${charInfo.personaName ? ` FOR "${charInfo.personaName}"` : ' (user persona)'}. Same strict rule: this is a photograph of a specific real person. When this person appears in the scene, reproduce their exact face — not a similar face, not an idealized version. Exact eyes, exact nose, exact mouth, exact hair color and texture. Do NOT smooth features, do NOT drift toward a generic pretty face. The viewer must immediately recognize this as the same person from the reference photo.` });
     }
 
     // ── 캐릭터 설명에서 외형 문장만 뽑아 텍스트로도 보강 (이미지 참조 혼자 놓치는 디테일 보완)
@@ -440,11 +440,11 @@ async function generateImage(imagePrompt, charInfo) {
 
     // ── 장면 생성 지시 — 얼굴 일관성 규칙을 앞뒤에서 샌드위치처럼 강조
     const faceRule = (hasCharRef || hasPersonaRef)
-        ? `⚠ FACE CONSISTENCY RULE (non-negotiable): The face(s) in your output must be the SAME individual(s) as shown in the reference image(s) above. Do NOT generalize, idealize, or re-invent the face. Do NOT drift toward a "generic pretty face". The viewer must be able to look at the output and recognize it as the same person from the reference photo. Same eyes. Same nose. Same mouth. Same jawline. Same hair.\n\n`
+        ? `🔒 ABSOLUTE FACE LOCK — this overrides everything else:\nThe reference image(s) above show specific real individuals. Your top priority is to output those EXACT faces.\n- Same eye shape, eyelid fold, iris color and pattern\n- Same nose (bridge width, tip shape, nostril shape)\n- Same mouth (lip bow, lip thickness, corner position)\n- Same jawline, chin, cheekbones\n- Same hair: exact color tone, texture, curl/wave, hairline\n- Same skin tone (exact warmth and depth)\nDO NOT improve, idealize, or smooth the face. DO NOT drift toward a generic beauty standard. DO NOT change hair color even slightly. The viewer must look at the output and immediately recognize the same person from the reference.\n\n`
         : '';
 
     const finalCheck = (hasCharRef || hasPersonaRef)
-        ? `\n\n⚠ Before finalizing output: does the face in the image match the reference? Same eye shape? Same nose? Same mouth? Same hair color and texture? If not, correct it.`
+        ? `\n\n🔒 FINAL FACE CHECK before output:\n□ Same eye shape and iris color?\n□ Same nose bridge and tip?\n□ Same lip shape?\n□ Same jawline and chin?\n□ Same exact hair color (tone and depth) and texture?\n□ Same skin tone?\nAll must match the reference photo. If any fails, correct before generating.`
         : '';
 
     parts.push({ text: faceRule + `Generate this scene:\n\n${imagePrompt}` + (c.negative_prompt ? `\n\nDo NOT include: ${c.negative_prompt}` : '') + finalCheck });
