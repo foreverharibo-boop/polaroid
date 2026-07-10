@@ -492,7 +492,41 @@ async function generateImage(imagePrompt, charInfo) {
 
     const outParts = data?.candidates?.[0]?.content?.parts || [];
     const imgPart = outParts.find(p => p.inlineData);
-    if (!imgPart) throw new Error('이미지 생성 결과가 없습니다. 모델/리전을 확인하세요.');
+
+    if (!imgPart) {
+        // ── 실패 원인 진단용 상세 로그 ──────────────────────────
+        // "이미지가 없다"는 결과만 보고는 원인(세이프티 필터/allowlist 미승인/모델이
+        // 텍스트로만 답함 등)을 알 수 없어서, 응답 원문을 최대한 그대로 콘솔에 남긴다.
+        const candidate = data?.candidates?.[0];
+        const finishReason = candidate?.finishReason || '(없음)';
+        const safetyRatings = candidate?.safetyRatings || [];
+        const blockedSafety = safetyRatings.filter(r => r.blocked || r.probability === 'HIGH' || r.probability === 'MEDIUM');
+        const textParts = outParts.filter(p => p.text).map(p => p.text).join(' / ');
+        const promptFeedback = data?.promptFeedback || null;
+
+        console.error('[Polaroid] ❌ 이미지 생성 실패 — 상세 진단:', {
+            finishReason,
+            blockedSafetyCategories: blockedSafety.map(r => `${r.category}:${r.probability}`),
+            모델이_텍스트로만_답함: textParts || '(텍스트 응답 없음)',
+            promptFeedback,
+            candidatesCount: data?.candidates?.length ?? 0,
+            원본응답: JSON.stringify(data)?.slice(0, 2000),
+        });
+
+        // 사용자에게 보여줄 에러 메시지도 원인별로 구체화
+        let hint = '이미지 생성 결과가 없습니다.';
+        if (finishReason === 'SAFETY' || blockedSafety.length) {
+            hint += ' (세이프티 필터에 걸린 것으로 보입니다 — 콘솔 로그의 blockedSafetyCategories 확인)';
+        } else if (textParts) {
+            hint += ` (모델이 이미지 대신 텍스트로만 응답함: "${textParts.slice(0, 150)}")`;
+        } else if (finishReason === '(없음)' || !data?.candidates?.length) {
+            hint += ' (응답 자체가 비정상 — 모델명/리전 또는 API 접근 권한(allowlist) 문제일 수 있음)';
+        } else {
+            hint += ` (finishReason: ${finishReason})`;
+        }
+        throw new Error(hint);
+    }
+
     return imgPart.inlineData;
 }
 
