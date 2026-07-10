@@ -361,11 +361,11 @@ Return ONLY the scene description. No explanation, no style tags.`;
         // ── 직접 입력 모드: 캐릭터/페르소나 프사를 레퍼런스로 함께 전달 (외모 일치도 향상) ──
         const parts = [];
         if (charInfo.avatarBase64) {
-            parts.push({ text: `Reference image of ${charInfo.name || 'the character'} (face/hair/body reference only):` });
+            parts.push({ text: `Reference image of ${charInfo.name || 'the character'} — FACE AND HAIR ONLY. Body proportions/physique will be specified separately in text.` });
             parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.avatarBase64 } });
         }
         if (charInfo.personaAvatarBase64) {
-            parts.push({ text: `Reference image of user persona ${charInfo.personaName || ''} (face/hair/body reference only):` });
+            parts.push({ text: `Reference image of user persona ${charInfo.personaName || ''} — FACE AND HAIR ONLY. Body proportions/physique will be specified separately in text.` });
             parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
         }
         parts.push({ text: promptText });
@@ -397,15 +397,30 @@ Return ONLY the scene description. No explanation, no style tags.`;
 // ── 외형 관련 문장 자동 추출 ──────────────────────────────────────
 // 캐릭터 설명에서 얼굴/신체 외형 관련 문장만 뽑아서 텍스트 참조로 추가한다.
 // 이미지 참조 하나만으론 모델이 디테일을 놓치는 경우가 있어서, 텍스트로도 재확인시킴.
-function extractPhysicalDescription(description) {
+// ── 얼굴/헤어 관련 문장만 추출 (아바타 이미지의 face reference 텍스트 보강용) ──
+function extractFaceDescription(description) {
     if (!description) return '';
-    const physicalKeywords = /hair|eye|skin|face|height|build|body|nose|mouth|lip|chin|jaw|cheek|brow|forehead|complexion|slim|thin|muscle|tall|short|pupil|lash|freckle|pale|dark|tan|blond|brunette|redhead|silver|white hair|black hair|blue eye|green eye|brown eye|gray eye|색|눈|머리|피부|얼굴|키|몸|코|입|턱|이목구비|눈썹|속눈썹|주근깨|창백|피|금발|흑발|은발/i;
+    const faceKeywords = /\bhair\b|eye|skin|face|nose|mouth|lip|chin|jaw|cheek|brow|forehead|complexion|pupil|lash|freckle|pale|dark|tan|blond|brunette|redhead|silver|white hair|black hair|blue eye|green eye|brown eye|gray eye|눈|머리|피부|얼굴|코|입|턱|이목구비|눈썹|속눈썹|주근깨|창백|금발|흑발|은발/i;
     return description.split(/[.。\n]+/)
-        .filter(l => physicalKeywords.test(l) && l.trim().length > 8)
-        .slice(0, 6)
+        .filter(l => faceKeywords.test(l) && l.trim().length > 8)
+        .slice(0, 4)
         .join('. ')
         .trim()
-        .slice(0, 500);
+        .slice(0, 400);
+}
+
+// ── 신체/체형 관련 문장만 추출 (텍스트 디스크립션에서 키·체중·문신 등 뽑기) ──
+// 아바타 프사는 얼굴 클로즈업인 경우가 많아서 몸 정보를 이미지에서 읽히기 어렵다.
+// 키·몸무게·문신·체형 같은 정보는 디스크립션 텍스트로 명시적으로 전달하는 게 더 정확함.
+function extractBodyDescription(description) {
+    if (!description) return '';
+    const bodyKeywords = /height|tall|short|weight|build|slim|thin|thick|muscle|athletic|curvy|tattoo|scar|piercing|chest|waist|hip|leg|arm|shoulder|stomach|abs|키|몸무게|문신|흉터|피어싱|체형|근육|허리|가슴|다리|팔|어깨|복근|날씬|마른|통통|뚱|체중|신장/i;
+    return description.split(/[.。\n]+/)
+        .filter(l => bodyKeywords.test(l) && l.trim().length > 8)
+        .slice(0, 5)
+        .join('. ')
+        .trim()
+        .slice(0, 400);
 }
 
 async function generateImage(imagePrompt, charInfo) {
@@ -416,25 +431,39 @@ async function generateImage(imagePrompt, charInfo) {
     const hasPersonaRef = !!charInfo.personaAvatarBase64;
 
     // ── 이미지를 "먼저" 보낸 뒤 설명 — Gemini는 이미지→텍스트 순서일 때 참조를 훨씬 잘 따름
+    // ── 아바타는 얼굴·헤어 전용 레퍼런스로만 사용. 신체(키·문신·체형 등)는 텍스트 디스크립션에서 따로 전달.
+    // (프사는 대부분 클로즈업이라 몸 정보를 이미지에서 읽히는 것 자체가 unreliable함)
     if (hasCharRef) {
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.avatarBase64 } });
-        parts.push({ text: `↑ IDENTITY-LOCKED FACE REFERENCE: "${charInfo.name || 'the character'}". This is a photograph of a specific real individual. You are NOT creating a new character — you are depicting THIS EXACT PERSON in a different situation. Lock in and reproduce without any change: eye shape and color (iris pattern, pupil), eyelid fold, brow shape and arch, nose bridge width and tip shape, philtrum, lip shape (upper bow and lower lip volume), chin contour, jawline angle, cheekbone position, ear shape, hairline, hair color (exact hue and tone — not approximate), hair texture and curl pattern, skin tone. ANY deviation — smoother skin, different eye shape, altered nose, different jaw, different hair — is a critical failure. Same face, different scene.` });
+        parts.push({ text: `↑ FACE & HAIR REFERENCE ONLY for "${charInfo.name || 'the character'}". This image is used exclusively to lock in facial features and hair — NOT body proportions (body info comes from text below). Reproduce without any change: eye shape and color (iris pattern, pupil), eyelid fold, brow shape and arch, nose bridge width and tip shape, philtrum, lip shape (upper bow and lower lip volume), chin contour, jawline angle, cheekbone position, hairline, hair color (exact hue and tone — not approximate), hair texture and curl pattern, skin tone. ANY facial deviation — smoother skin, different eye shape, altered nose, different jaw, different hair color — is a critical failure.` });
+
+        // 얼굴·헤어 관련 텍스트 보강 (이미지가 저해상도일 때 디테일 보완)
+        const faceDesc = extractFaceDescription(charInfo.description);
+        if (faceDesc) {
+            parts.push({ text: `Confirmed face/hair traits of ${charInfo.name || 'the character'} (secondary check — image above takes priority): ${faceDesc}` });
+        }
     }
 
     if (hasPersonaRef) {
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: charInfo.personaAvatarBase64 } });
-        parts.push({ text: `↑ IDENTITY-LOCKED FACE REFERENCE${charInfo.personaName ? ` FOR "${charInfo.personaName}"` : ' (user persona)'}. Same strict rule: this is a photograph of a specific real person. When this person appears in the scene, reproduce their exact face — not a similar face, not an idealized version. Exact eyes, exact nose, exact mouth, exact hair color and texture. Do NOT smooth features, do NOT drift toward a generic pretty face. The viewer must immediately recognize this as the same person from the reference photo.` });
+        parts.push({ text: `↑ FACE & HAIR REFERENCE ONLY${charInfo.personaName ? ` for "${charInfo.personaName}"` : ' (user persona)'}. Same rule: face and hair only — NOT body proportions. Reproduce exact eyes, exact nose, exact mouth, exact hair color and texture. Do NOT smooth features, do NOT drift toward a generic face. The viewer must immediately recognize this as the same person from the reference photo.` });
+
+        const personaFaceDesc = extractFaceDescription(charInfo.personaDescription);
+        if (personaFaceDesc) {
+            parts.push({ text: `Confirmed face/hair traits of ${charInfo.personaName || 'user persona'} (secondary check): ${personaFaceDesc}` });
+        }
     }
 
-    // ── 캐릭터 설명에서 외형 문장만 뽑아 텍스트로도 보강 (이미지 참조 혼자 놓치는 디테일 보완)
-    const physicalDesc = extractPhysicalDescription(charInfo.description);
-    if (physicalDesc && hasCharRef) {
-        parts.push({ text: `Additional confirmed physical traits of ${charInfo.name || 'the character'} (use as secondary check against the reference image above — the image takes priority): ${physicalDesc}` });
+    // ── 신체/체형 정보는 텍스트 디스크립션에서만 추출해서 전달
+    // (키·몸무게·문신·흉터·체형 같은 정보는 아바타 프사에 담기지 않는 경우가 대부분)
+    const bodyDesc = extractBodyDescription(charInfo.description);
+    if (bodyDesc) {
+        parts.push({ text: `Body/physique traits of ${charInfo.name || 'the character'} (from description — the reference image above does NOT contain this info, so follow the text): ${bodyDesc}` });
     }
-    if (charInfo.personaDescription && hasPersonaRef) {
-        const personaPhysical = extractPhysicalDescription(charInfo.personaDescription);
-        if (personaPhysical) {
-            parts.push({ text: `Additional confirmed physical traits of persona ${charInfo.personaName || ''}: ${personaPhysical}` });
+    if (charInfo.personaDescription) {
+        const personaBodyDesc = extractBodyDescription(charInfo.personaDescription);
+        if (personaBodyDesc) {
+            parts.push({ text: `Body/physique traits of ${charInfo.personaName || 'user persona'} (from description): ${personaBodyDesc}` });
         }
     }
 
