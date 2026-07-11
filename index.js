@@ -882,12 +882,6 @@ async function checkServerAvailable() {
 
 // ── IndexedDB 폴백 ────────────────────────────────────────
 const DB_NAME = 'PolaroidGallery';
-// ── DB_VERSION 2로 올림 ────────────────────────────────────
-// 예전에 서버저장 모드로 잘못 판단(404 버그)된 상태에서 IndexedDB가 스토어 없이
-// 껍데기만 생성된 기기가 있었음. onupgradeneeded는 "기존 DB 버전보다 높은 버전으로
-// open할 때"만 실행되기 때문에, 버전을 그대로 두면 이미 존재하는(스토어 없는) DB는
-// 영원히 고쳐지지 않고 매번 "object store not found" 에러만 남. 버전을 올려서
-// 강제로 onupgradeneeded를 다시 태워 스토어를 만들어준다.
 const DB_VERSION = 2;
 const STORE_NAME = 'photos';
 let _dbPromise = null;
@@ -904,14 +898,13 @@ function openDB() {
         };
         req.onsuccess = () => {
             const db = req.result;
-            // ── 안전망: 버전은 맞는데 스토어가 없는 비정상 상태면 DB를 지우고 재생성 ──
+            // ── 스토어가 여전히 없는 비정상 상태여도 절대 DB를 삭제하지 않는다 ──────
+            // (예전에 자동 삭제 로직이 있었는데, 오작동 시 저장된 사진을 통째로
+            //  날려버리는 파괴적인 동작이라 위험했음. 사용자 데이터를 다루는 코드는
+            //  실패해도 조용히 실패하거나 사용자에게 알리기만 해야지, 임의로 지우면 안 됨)
             if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.close();
-                const delReq = indexedDB.deleteDatabase(DB_NAME);
-                delReq.onsuccess = delReq.onerror = () => {
-                    _dbPromise = null;
-                    openDB().then(resolve).catch(reject);
-                };
+                console.error('[Polaroid] ⚠️ IndexedDB에 photos 스토어가 없습니다. DB_VERSION을 올렸는데도 없다면 브라우저 저장공간 문제일 수 있습니다. (데이터 보호를 위해 자동 삭제하지 않음)');
+                reject(new Error('갤러리 저장소(photos 스토어)를 찾을 수 없습니다. 기존 사진 데이터 보호를 위해 자동으로 삭제하지 않았습니다 — 문의 바랍니다.'));
                 return;
             }
             resolve(db);
@@ -942,7 +935,9 @@ async function saveToGallery(charName, base64Image, meta) {
         await saveIndex(index);
         console.log('[Polaroid] 서버 저장 완료:', id);
     } else {
-        // ── IndexedDB 폴백 ──
+        // ── IndexedDB 폴백 ── 서버보다 훨씬 불안정한 저장소(브라우저 데이터 삭제/
+        // 앱 재설치 시 통째로 날아감)라서, 저장될 때마다 사용자가 인지할 수 있게 경고
+        toastr.warning('📷 서버 저장이 불가능해 브라우저 저장소(IndexedDB)에 저장됩니다. 이 저장소는 브라우저 데이터를 지우면 함께 사라질 수 있으니, 갤러리의 다운로드 버튼으로 주기적으로 백업하는 걸 추천합니다.', '', { timeOut: 8000 });
         const db = await openDB();
         await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -971,6 +966,35 @@ async function loadGallery(charName) {
             req.onsuccess = () => resolve((req.result || []).sort((a, b) => b.id - a.id));
             req.onerror = () => reject(req.error);
         });
+    }
+}
+
+// ── 갤러리 백업(다운로드) ────────────────────────────────────
+// 서버/IndexedDB 어느 쪽이든, 실수로 데이터가 날아가는 사고에 대비해 사용자가
+// 직접 폰 다운로드 폴더에 원본 사진을 백업해둘 수 있게 하는 기능.
+async function exportGalleryPhotos(charName) {
+    if (!charName) { toastr.warning('📷 먼저 캐릭터를 선택하세요'); return; }
+    try {
+        const items = await loadGallery(charName);
+        if (!items.length) { toastr.info('📷 백업할 사진이 없습니다'); return; }
+
+        toastr.info(`📷 ${items.length}장 다운로드 중...`);
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const ts = item.timestamp ? new Date(item.timestamp).toISOString().replace(/[:.]/g, '-') : `${i}`;
+            const a = document.createElement('a');
+            a.href = `data:image/jpeg;base64,${item.image}`;
+            a.download = `polaroid_${charName}_${ts}.jpg`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            // 브라우저가 연속 다운로드를 팝업 차단으로 씹지 않도록 살짝 간격을 둠
+            await new Promise(r => setTimeout(r, 300));
+        }
+        toastr.success(`📷 ${items.length}장 다운로드 완료`);
+    } catch (e) {
+        console.error('[Polaroid] 백업 실패:', e);
+        toastr.error(`📷 백업 실패: ${e.message}`);
     }
 }
 
@@ -1283,6 +1307,7 @@ function openGallery() {
                         <option value="">캐릭터 선택…</option>
                         ${chars.map(c => `<option value="${c.name}" ${c.name === curChar ? 'selected' : ''}>${c.name} (${c.count})</option>`).join('')}
                     </select>
+                    <button id="pol-backup-btn" class="pol-modal-close-btn" title="현재 캐릭터 사진 전체 백업(다운로드)"><i class="fa-solid fa-download"></i></button>
                     <button id="pol-modal-close" class="pol-modal-close-btn" title="닫기"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div id="pol-grid" class="pol-grid"><div class="pol-empty">📷 캐릭터를 선택하세요</div></div>
@@ -1296,6 +1321,8 @@ function openGallery() {
 
         const sel = modal.querySelector('#pol-char-sel');
         sel.onchange = () => renderGrid(modal.querySelector('#pol-grid'), sel.value);
+
+        bindTap(modal.querySelector('#pol-backup-btn'), () => exportGalleryPhotos(sel.value));
 
         // 현재 캐릭터가 갤러리에 있으면 바로 표시, 없으면 select 첫 항목으로
         if (curChar && chars.find(c => c.name === curChar)) {
