@@ -803,81 +803,16 @@ async function getCharacterInfo() {
 // → 컴·폰 모두 같은 ST 서버를 바라보므로 갤러리가 자동으로 동기화됨.
 
 const GALLERY_PREFIX = 'polaroid_v1_'; // 구버전 localStorage 마이그레이션용
-const POL_DIR = 'user/polaroid';
-const INDEX_FILE = `${POL_DIR}/index.json`;
-
-// ST /api/userdata 헬퍼
-async function serverSave(path, data) {
-    const res = await fetch('/api/userdata/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, data: typeof data === 'string' ? data : JSON.stringify(data) }),
-    });
-    if (!res.ok) {
-        const msg = await res.text().catch(() => res.status);
-        throw new Error(`서버 저장 실패 [${res.status}]: ${path} — ${msg}`);
-    }
-}
-
-async function serverLoad(path) {
-    const res = await fetch('/api/userdata/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-    });
-    if (res.status === 404 || res.status === 400) return null;
-    if (!res.ok) {
-        const msg = await res.text().catch(() => res.status);
-        throw new Error(`서버 읽기 실패 [${res.status}]: ${path} — ${msg}`);
-    }
-    const text = await res.text();
-    // ST가 { data: "..." } 형태로 감싸서 줄 수도 있음
-    try {
-        const outer = JSON.parse(text);
-        if (outer && typeof outer.data === 'string') return JSON.parse(outer.data);
-        return outer;
-    } catch { return null; }
-}
-
-async function serverDelete(path) {
-    try {
-        await fetch('/api/userdata/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path }),
-        });
-    } catch (_) {}
-}
-
-// 서버 API 사용 가능 여부 (첫 호출 때 자동 판별, 이후 캐시)
-let _useServer = null;
-async function checkServerAvailable() {
-    if (_useServer !== null) return _useServer;
-    try {
-        const res = await fetch('/api/userdata/load', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: INDEX_FILE }),
-        });
-
-        if (res.status === 403 || res.status === 405 || res.status === 501) {
-            _useServer = false;
-        } else if (res.status === 404) {
-            // 404엔 두 종류가 있음:
-            //  ① 엔드포인트는 살아있는데 그 파일이 없어서 404 (JSON으로 응답) → 서버 가용
-            //  ② /api/userdata 라우트 자체가 이 ST 버전/설정엔 없어서 404 (express 기본
-            //     HTML 404 페이지로 응답) → 서버 저장 기능 자체가 없는 것
-            // Content-Type으로 구분: 진짜 API 응답이면 JSON, 라우트 자체가 없으면 text/html
-            const ct = res.headers.get('content-type') || '';
-            _useServer = ct.includes('application/json');
-        } else {
-            _useServer = true;
-        }
-    } catch(_) {
-        _useServer = false;
-    }
-    console.log('[Polaroid] 서버 저장 모드:', _useServer ? '✅ /api/userdata' : '⚠️ IndexedDB 폴백');
-    return _useServer;
+// ── 갤러리 저장소: extension_settings 사용 ──────────────────────
+// 예전엔 /api/userdata 라는, 실제로는 존재하지 않는 엔드포인트를 불렀었음 (항상 실패
+// → 매번 IndexedDB로 폴백). extension_settings + saveSettingsDebounced()는 이 확장의
+// API 키/스타일 설정을 저장할 때 이미 검증된, ST 코어가 보장하는 진짜 저장 경로라서
+// 이걸로 통일함. settings.json에 이미지까지 통째로 들어가 용량이 커지고 ST 로딩이
+// 느려질 수 있다는 점을 사용자가 인지하고 감수하기로 함(요청에 따름).
+function getGalleryStore() {
+    if (!extension_settings[EXT]) extension_settings[EXT] = {};
+    if (!extension_settings[EXT].gallery) extension_settings[EXT].gallery = {};
+    return extension_settings[EXT].gallery; // { [캐릭터명]: [ {id, image, timestamp, snippet, prompt}, ... ] }
 }
 
 // ── IndexedDB 폴백 ────────────────────────────────────────
@@ -914,59 +849,18 @@ function openDB() {
     return _dbPromise;
 }
 
-// 인덱스 읽기 (없으면 빈 배열)
-async function loadIndex() {
-    return (await serverLoad(INDEX_FILE)) || [];
-}
-
-// 인덱스 저장
-async function saveIndex(index) {
-    await serverSave(INDEX_FILE, index);
-}
-
 async function saveToGallery(charName, base64Image, meta) {
-    if (await checkServerAvailable()) {
-        // ── 서버 저장 ──
-        const id = Date.now() + '_' + Math.floor(Math.random() * 1e6);
-        const item = { id, character: charName, image: base64Image, ...meta };
-        await serverSave(`${POL_DIR}/photos/${id}.json`, item);
-        const index = await loadIndex();
-        index.unshift({ id, character: charName, timestamp: meta.timestamp });
-        await saveIndex(index);
-        console.log('[Polaroid] 서버 저장 완료:', id);
-    } else {
-        // ── IndexedDB 폴백 ── 서버보다 훨씬 불안정한 저장소(브라우저 데이터 삭제/
-        // 앱 재설치 시 통째로 날아감)라서, 저장될 때마다 사용자가 인지할 수 있게 경고
-        toastr.warning('📷 서버 저장이 불가능해 브라우저 저장소(IndexedDB)에 저장됩니다. 이 저장소는 브라우저 데이터를 지우면 함께 사라질 수 있으니, 갤러리의 다운로드 버튼으로 주기적으로 백업하는 걸 추천합니다.', '', { timeOut: 8000 });
-        const db = await openDB();
-        await new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).add({ id: Date.now() + Math.random(), character: charName, image: base64Image, ...meta });
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
-        });
-        console.log('[Polaroid] IndexedDB 저장 완료');
-    }
+    const gallery = getGalleryStore();
+    if (!gallery[charName]) gallery[charName] = [];
+    const id = Date.now() + '_' + Math.floor(Math.random() * 1e6);
+    gallery[charName].unshift({ id, character: charName, image: base64Image, ...meta });
+    saveSettingsDebounced();
+    console.log('[Polaroid] extension_settings 저장 완료:', id);
 }
 
 async function loadGallery(charName) {
-    if (await checkServerAvailable()) {
-        const index = await loadIndex();
-        const filtered = index.filter(e => e.character === charName);
-        // 사진마다 순서대로 await하면 장수만큼 서버 왕복이 쌓여서 느려지므로 병렬 로드
-        const loaded = await Promise.all(
-            filtered.map(entry => serverLoad(`${POL_DIR}/photos/${entry.id}.json`).catch(() => null))
-        );
-        return loaded.filter(Boolean);
-    } else {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const req = tx.objectStore(STORE_NAME).index('character').getAll(charName);
-            req.onsuccess = () => resolve((req.result || []).sort((a, b) => b.id - a.id));
-            req.onerror = () => reject(req.error);
-        });
-    }
+    const gallery = getGalleryStore();
+    return (gallery[charName] || []).slice(); // 원본 배열 변형 방지용 복사본
 }
 
 // ── 갤러리 백업(다운로드) ────────────────────────────────────
@@ -983,7 +877,7 @@ async function exportGalleryPhotos(charName) {
             const item = items[i];
             const ts = item.timestamp ? new Date(item.timestamp).toISOString().replace(/[:.]/g, '-') : `${i}`;
             const a = document.createElement('a');
-            a.href = `data:image/jpeg;base64,${item.image}`;
+            a.href = item.image; // 이미 "data:image/jpeg;base64,..." 형태로 저장돼있음
             a.download = `polaroid_${charName}_${ts}.jpg`;
             document.body.appendChild(a);
             a.click();
@@ -999,40 +893,17 @@ async function exportGalleryPhotos(charName) {
 }
 
 async function deleteFromGallery(charName, id) {
-    if (await checkServerAvailable()) {
-        await serverDelete(`${POL_DIR}/photos/${id}.json`);
-        const index = await loadIndex();
-        await saveIndex(index.filter(e => e.id !== id));
-    } else {
-        const db = await openDB();
-        await new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).delete(id);
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
-        });
-    }
+    const gallery = getGalleryStore();
+    if (!gallery[charName]) return;
+    gallery[charName] = gallery[charName].filter(e => e.id !== id);
+    saveSettingsDebounced();
 }
 
 async function allGalleryChars() {
-    if (await checkServerAvailable()) {
-        const index = await loadIndex();
-        const counts = {};
-        index.forEach(e => { counts[e.character] = (counts[e.character] || 0) + 1; });
-        return Object.entries(counts).map(([name, count]) => ({ name, count }));
-    } else {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const req = tx.objectStore(STORE_NAME).getAll();
-            req.onsuccess = () => {
-                const counts = {};
-                (req.result || []).forEach(item => { counts[item.character] = (counts[item.character] || 0) + 1; });
-                resolve(Object.entries(counts).map(([name, count]) => ({ name, count })));
-            };
-            req.onerror = () => reject(req.error);
-        });
-    }
+    const gallery = getGalleryStore();
+    return Object.entries(gallery)
+        .filter(([, items]) => items && items.length)
+        .map(([name, items]) => ({ name, count: items.length }));
 }
 
 // IndexedDB / localStorage → 서버로 1회 마이그레이션
@@ -1066,8 +937,9 @@ async function migrateLocalStorageGallery() {
 
     // ② IndexedDB (PolaroidGallery) 마이그레이션
     try {
-        const existingIndex = await serverLoad(INDEX_FILE);
-        if (existingIndex && existingIndex.length > 0) return; // 이미 서버에 데이터 있음
+        const gallery = getGalleryStore();
+        const hasExisting = Object.values(gallery).some(items => items && items.length > 0);
+        if (hasExisting) return; // 이미 새 저장소에 데이터 있음 (중복 마이그레이션 방지)
 
         const dbReq = indexedDB.open('PolaroidGallery', 1);
         await new Promise((resolve) => {
