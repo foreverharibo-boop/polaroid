@@ -531,10 +531,25 @@ async function generateImage(imagePrompt, charInfo) {
 }
 
 // ── 이미지 가져오기 helpers ────────────────────────────────
-async function fetchImageAsBase64(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`avatar fetch ${res.status}`);
-    const blob = await res.blob();
+async function fetchImageAsBase64(url, fallbackUrl) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`image fetch ${res.status}`);
+        const blob = await res.blob();
+        return await blobToBase64(blob);
+    } catch (err) {
+        if (fallbackUrl) {
+            console.warn('[Polaroid] 원본 화질 아바타 로드 실패, 썸네일로 폴백:', url, err);
+            const res2 = await fetch(fallbackUrl);
+            if (!res2.ok) throw new Error(`fallback image fetch ${res2.status}`);
+            const blob2 = await res2.blob();
+            return await blobToBase64(blob2);
+        }
+        throw err;
+    }
+}
+
+function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result.split(',')[1]);
@@ -561,6 +576,7 @@ async function getCharacterInfo() {
             if (ch.avatar && ch.avatar !== 'none') {
                 try {
                     info.avatarBase64 = await fetchImageAsBase64(
+                        `/characters/${encodeURIComponent(ch.avatar)}`,
                         `/thumbnail?type=avatar&file=${encodeURIComponent(ch.avatar)}`
                     );
                 } catch (_) {}
@@ -670,15 +686,10 @@ async function getCharacterInfo() {
             if (avatarFile && avatarFile !== 'none') {
                 try {
                     info.personaAvatarBase64 = await fetchImageAsBase64(
+                        `/User Avatars/${encodeURIComponent(avatarFile)}`,
                         `/thumbnail?type=persona&file=${encodeURIComponent(avatarFile)}`
                     );
-                } catch (_) {
-                    try {
-                        info.personaAvatarBase64 = await fetchImageAsBase64(
-                            `/User Avatars/${encodeURIComponent(avatarFile)}`
-                        );
-                    } catch (_) {}
-                }
+                } catch (_) {}
             }
         } else {
             // 페르소나 객체 못 찾아도 이름은 name1 → description파싱 → activeKey(파일명보단 낫음) → name2 순으로
@@ -688,6 +699,7 @@ async function getCharacterInfo() {
             if (!activeKey) activeKey = 'user-default.png';
             try {
                 info.personaAvatarBase64 = await fetchImageAsBase64(
+                    `/User Avatars/${encodeURIComponent(activeKey)}`,
                     `/thumbnail?type=persona&file=${encodeURIComponent(activeKey)}`
                 );
             } catch (_) {}
