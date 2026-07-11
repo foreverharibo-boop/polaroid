@@ -515,6 +515,13 @@ async function generateImage(imagePrompt, charInfo) {
 
     parts.push({ text: faceRule + `Generate this scene:\n\n${imagePrompt}` + (c.negative_prompt ? `\n\nDo NOT include: ${c.negative_prompt}` : '') + finalCheck });
 
+    // ── 진단용 로그: 실제로 이미지 모델에 전송되는 텍스트 전체를 콘솔에 남긴다 ──────
+    // PROHIBITED_CONTENT 등으로 막혔을 때, API가 "어느 부분이 걸렸는지"는 안 알려주기
+    // 때문에, 최종적으로 뭘 보냈는지 눈으로 직접 확인하고 의심 구간을 추측할 수 있게 함.
+    // (base64 이미지 데이터는 용량이 커서 제외하고 텍스트만 남김)
+    const sentTextsOnly = parts.filter(p => p.text).map((p, i) => `--- 텍스트 파트 #${i + 1} ---\n${p.text}`).join('\n\n');
+    console.log(`[Polaroid] 📤 이미지 생성 요청 전송 텍스트 (전체 ${parts.filter(p => p.text).length}개 텍스트 파트, 이미지 ${parts.filter(p => p.inlineData).length}장):\n\n${sentTextsOnly}`);
+
     const data = await apiPost(c.image_model, {
         contents: [{ role: 'user', parts }],
         generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
