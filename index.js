@@ -551,8 +551,18 @@ async function generateImage(imagePrompt, charInfo) {
         });
 
         // 사용자에게 보여줄 에러 메시지도 원인별로 구체화
+        // promptFeedback.blockReason이 있으면 이게 제일 정확한 원인이라 최우선으로 확인
         let hint = '이미지 생성 결과가 없습니다.';
-        if (finishReason === 'SAFETY' || blockedSafety.length) {
+        if (promptFeedback?.blockReason) {
+            const reasonMap = {
+                PROHIBITED_CONTENT: '금지된 콘텐츠로 판단되어 프롬프트 자체가 차단됨 (세이프티 하드 블록 — threshold 설정으로 우회 불가)',
+                SAFETY: '세이프티 필터에 걸림',
+                OTHER: '기타 사유로 차단됨',
+                BLOCKLIST: '금칙어 목록에 걸림',
+            };
+            const readable = reasonMap[promptFeedback.blockReason] || promptFeedback.blockReason;
+            hint += ` (${readable}${promptFeedback.blockReasonMessage ? ` — ${promptFeedback.blockReasonMessage}` : ''})`;
+        } else if (finishReason === 'SAFETY' || blockedSafety.length) {
             hint += ' (세이프티 필터에 걸린 것으로 보입니다 — 콘솔 로그의 blockedSafetyCategories 확인)';
         } else if (textParts) {
             hint += ` (모델이 이미지 대신 텍스트로만 응답함: "${textParts.slice(0, 150)}")`;
