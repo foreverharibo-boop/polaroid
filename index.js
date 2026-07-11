@@ -859,8 +859,20 @@ async function checkServerAvailable() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: INDEX_FILE }),
         });
-        // 404(파일 없음)도 "서버는 살아있음"으로 판단
-        _useServer = (res.status !== 403 && res.status !== 405 && res.status !== 501);
+
+        if (res.status === 403 || res.status === 405 || res.status === 501) {
+            _useServer = false;
+        } else if (res.status === 404) {
+            // 404엔 두 종류가 있음:
+            //  ① 엔드포인트는 살아있는데 그 파일이 없어서 404 (JSON으로 응답) → 서버 가용
+            //  ② /api/userdata 라우트 자체가 이 ST 버전/설정엔 없어서 404 (express 기본
+            //     HTML 404 페이지로 응답) → 서버 저장 기능 자체가 없는 것
+            // Content-Type으로 구분: 진짜 API 응답이면 JSON, 라우트 자체가 없으면 text/html
+            const ct = res.headers.get('content-type') || '';
+            _useServer = ct.includes('application/json');
+        } else {
+            _useServer = true;
+        }
     } catch(_) {
         _useServer = false;
     }
