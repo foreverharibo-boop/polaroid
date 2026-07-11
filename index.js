@@ -882,7 +882,13 @@ async function checkServerAvailable() {
 
 // ── IndexedDB 폴백 ────────────────────────────────────────
 const DB_NAME = 'PolaroidGallery';
-const DB_VERSION = 1;
+// ── DB_VERSION 2로 올림 ────────────────────────────────────
+// 예전에 서버저장 모드로 잘못 판단(404 버그)된 상태에서 IndexedDB가 스토어 없이
+// 껍데기만 생성된 기기가 있었음. onupgradeneeded는 "기존 DB 버전보다 높은 버전으로
+// open할 때"만 실행되기 때문에, 버전을 그대로 두면 이미 존재하는(스토어 없는) DB는
+// 영원히 고쳐지지 않고 매번 "object store not found" 에러만 남. 버전을 올려서
+// 강제로 onupgradeneeded를 다시 태워 스토어를 만들어준다.
+const DB_VERSION = 2;
 const STORE_NAME = 'photos';
 let _dbPromise = null;
 function openDB() {
@@ -896,7 +902,20 @@ function openDB() {
                 store.createIndex('character', 'character', { unique: false });
             }
         };
-        req.onsuccess = () => resolve(req.result);
+        req.onsuccess = () => {
+            const db = req.result;
+            // ── 안전망: 버전은 맞는데 스토어가 없는 비정상 상태면 DB를 지우고 재생성 ──
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.close();
+                const delReq = indexedDB.deleteDatabase(DB_NAME);
+                delReq.onsuccess = delReq.onerror = () => {
+                    _dbPromise = null;
+                    openDB().then(resolve).catch(reject);
+                };
+                return;
+            }
+            resolve(db);
+        };
         req.onerror = () => reject(req.error);
     });
     return _dbPromise;
