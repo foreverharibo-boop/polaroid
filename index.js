@@ -397,11 +397,46 @@ Return ONLY the scene description. No explanation, no style tags.`;
 // ── 외형 관련 문장 자동 추출 ──────────────────────────────────────
 // 캐릭터 설명에서 얼굴/신체 외형 관련 문장만 뽑아서 텍스트 참조로 추가한다.
 // 이미지 참조 하나만으론 모델이 디테일을 놓치는 경우가 있어서, 텍스트로도 재확인시킴.
+
+// ── 성적으로 노골적인 섹션(킹크·성기·성적취향 등)을 통째로 제거 ──────────────
+// extractFace/BodyDescription의 키워드 매칭이 문장 단위라서, "Kinks: ...armpits...
+// face sitting..." 같은 문장은 신체 키워드(armpit, face)가 우연히 섞여있다는 이유로
+// 킹크 리스트 전체가 그대로 딸려 들어오는 문제가 있었다. 이미지 생성 API에 그런 텍스트가
+// 통째로 전달되면 세이프티 필터(PROHIBITED_CONTENT)에 걸려 생성 자체가 막혀버린다.
+// 그래서 신체/얼굴 추출을 하기 "전에" 노골적인 섹션 자체를 아예 잘라낸다.
+function stripExplicitSections(description) {
+    if (!description) return '';
+
+    // 매칭시킬 섹션 헤더 키워드 (대괄호 헤더 "[[Sexual Behavior]]" 형태 + 인라인 "- Kinks:" 형태 둘 다 대응)
+    const explicitHeaderRe = /kink|genitalia|sexual\s*behavio(u)?r|fetish|nsfw|intimacy|libido|partner\s*preference|vocalizations?\s*\(?during sex|experience:\s*(whore|slut)|hard\s*turn[- ]?on|hard\s*turn[- ]?off|turn[- ]?on|turn[- ]?off|성적\s*취향|성기|킹크|야한|성적\s*행동/i;
+    const bracketHeaderRe = /^\s*\[\[.*\]\]\s*$/;
+
+    const lines = description.split('\n');
+    const kept = [];
+    let skipping = false;
+
+    for (const line of lines) {
+        if (bracketHeaderRe.test(line)) {
+            // 새로운 [[섹션]] 헤더를 만나면, 그 섹션이 노골적인 섹션인지에 따라 skip 상태 갱신
+            skipping = explicitHeaderRe.test(line);
+            if (skipping) continue; // 헤더 자체도 버림
+        } else if (!skipping && /^\s*[-*]?\s*(kinks?|genitalia|fetish(es)?|libido|partner preferences?|experience|hard turn[- ]?ons?|hard turn[- ]?offs?)\s*:/i.test(line)) {
+            // 대괄호 섹션 없이 인라인 라벨("- Kinks: ...")로만 오는 경우도 그 줄 자체를 버림
+            continue;
+        }
+        if (skipping) continue;
+        kept.push(line);
+    }
+
+    return kept.join('\n');
+}
+
 // ── 얼굴/헤어 관련 문장만 추출 (아바타 이미지의 face reference 텍스트 보강용) ──
 function extractFaceDescription(description) {
     if (!description) return '';
+    const cleaned = stripExplicitSections(description);
     const faceKeywords = /\bhair\b|eye|skin|face|nose|mouth|lip|chin|jaw|cheek|brow|forehead|complexion|pupil|lash|freckle|pale|dark|tan|blond|brunette|redhead|silver|white hair|black hair|blue eye|green eye|brown eye|gray eye|눈|머리|피부|얼굴|코|입|턱|이목구비|눈썹|속눈썹|주근깨|창백|금발|흑발|은발/i;
-    return description.split(/[.。\n]+/)
+    return cleaned.split(/[.。\n]+/)
         .filter(l => faceKeywords.test(l) && l.trim().length > 8)
         .slice(0, 30)
         .join('. ')
@@ -414,14 +449,16 @@ function extractFaceDescription(description) {
 // 키·몸무게·문신·체형 같은 정보는 디스크립션 텍스트로 명시적으로 전달하는 게 더 정확함.
 function extractBodyDescription(description) {
     if (!description) return '';
+    const cleaned = stripExplicitSections(description);
     const bodyKeywords = /height|tall|short|weight|build|slim|thin|thick|muscle|athletic|curvy|tattoo|scar|piercing|chest|waist|hip|leg|arm|shoulder|stomach|abs|키|몸무게|문신|흉터|피어싱|체형|근육|허리|가슴|다리|팔|어깨|복근|날씬|마른|통통|뚱|체중|신장/i;
-    return description.split(/[.。\n]+/)
+    return cleaned.split(/[.。\n]+/)
         .filter(l => bodyKeywords.test(l) && l.trim().length > 8)
         .slice(0, 30)
         .join('. ')
         .trim()
         .slice(0, 5000);
 }
+
 
 async function generateImage(imagePrompt, charInfo) {
     const c = cfg();
