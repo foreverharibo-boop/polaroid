@@ -432,9 +432,24 @@ function stripExplicitSections(description) {
 }
 
 // ── 얼굴/헤어 관련 문장만 추출 (아바타 이미지의 face reference 텍스트 보강용) ──
+// 1순위: "Hair:", "Eyes:" 같은 라벨이 붙은 필드가 있으면 그 줄만 정확히 뽑는다.
+//   (라벨 없는 문장 전체를 훑는 기존 방식은, 배경 서사/성격/트라우마 서술 등에서
+//    얼굴 관련 단어(face, eye 등)가 우연히 섞인 문장을 통째로 끌고 오는 문제가 있었음 —
+//    예: "sexually abused... at 12" 같은 트라우마 서술이 신체 정보로 오인식되어
+//    이미지 생성 프롬프트에 그대로 들어가 세이프티 필터에 걸리는 사고가 실제로 발생함)
+// 2순위 폴백: 라벨 형식이 없는 자유서술형 카드는 기존 키워드 문장 매칭 사용
 function extractFaceDescription(description) {
     if (!description) return '';
     const cleaned = stripExplicitSections(description);
+
+    const FACE_LABEL_RE = /^[-*\s]*(hair|skin|eyes?|face|nose|mouth|lips?|eyebrows?|complexion)\s*:/i;
+    const labeledLines = cleaned.split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 8 && FACE_LABEL_RE.test(l));
+    if (labeledLines.length) {
+        return labeledLines.slice(0, 15).join('. ').trim().slice(0, 5000);
+    }
+
     const faceKeywords = /\bhair\b|eye|skin|face|nose|mouth|lip|chin|jaw|cheek|brow|forehead|complexion|pupil|lash|freckle|pale|dark|tan|blond|brunette|redhead|silver|white hair|black hair|blue eye|green eye|brown eye|gray eye|눈|머리|피부|얼굴|코|입|턱|이목구비|눈썹|속눈썹|주근깨|창백|금발|흑발|은발/i;
     return cleaned.split(/[.。\n]+/)
         .filter(l => faceKeywords.test(l) && l.trim().length > 8)
@@ -447,9 +462,19 @@ function extractFaceDescription(description) {
 // ── 신체/체형 관련 문장만 추출 (텍스트 디스크립션에서 키·체중·문신 등 뽑기) ──
 // 아바타 프사는 얼굴 클로즈업인 경우가 많아서 몸 정보를 이미지에서 읽히기 어렵다.
 // 키·몸무게·문신·체형 같은 정보는 디스크립션 텍스트로 명시적으로 전달하는 게 더 정확함.
+// 위 extractFaceDescription과 동일한 이유로 라벨 기반 추출을 1순위로 사용.
 function extractBodyDescription(description) {
     if (!description) return '';
     const cleaned = stripExplicitSections(description);
+
+    const BODY_LABEL_RE = /^[-*\s]*(body|height|weight|build|physique|piercings?|tattoos?)\s*:/i;
+    const labeledLines = cleaned.split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 8 && BODY_LABEL_RE.test(l));
+    if (labeledLines.length) {
+        return labeledLines.slice(0, 15).join('. ').trim().slice(0, 5000);
+    }
+
     const bodyKeywords = /height|tall|short|weight|build|slim|thin|thick|muscle|athletic|curvy|tattoo|scar|piercing|chest|waist|hip|leg|arm|shoulder|stomach|abs|키|몸무게|문신|흉터|피어싱|체형|근육|허리|가슴|다리|팔|어깨|복근|날씬|마른|통통|뚱|체중|신장/i;
     return cleaned.split(/[.。\n]+/)
         .filter(l => bodyKeywords.test(l) && l.trim().length > 8)
