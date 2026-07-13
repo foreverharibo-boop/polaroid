@@ -5,21 +5,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500&display=swap');
 
 /* ── 메시지 버튼 ─────────────────────────────────────────── */
+/* 크기·정렬은 함께 붙인 ST 기본 클래스 mes_button이 담당하게 두고(다른 아이콘들과
+   자동으로 정렬을 맞추기 위함), 여기선 색상 강조만 얹는다. 예전엔 width/height를
+   24px로 고정해놨었는데, 그 고정 크기가 옆 아이콘들의 자연스러운 크기와 달라서
+   줄이 어긋나 보이는 원인이었음. */
 .pol-msg-btn {
-    cursor: pointer;
-    opacity: 0.55;
-    transition: opacity .2s, color .2s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    font-size: 14px;
     color: var(--SmartThemeBodyColor, #ccc);
-    flex-shrink: 0;
-    touch-action: manipulation;
+    transition: color .2s;
 }
-.pol-msg-btn:hover { opacity: 1; color: #d4a017 !important; }
+.pol-msg-btn:hover { color: #d4a017 !important; }
 
 /* ── 인라인 폴라로이드 ───────────────────────────────────── */
 .polaroid-wrap {
@@ -292,15 +286,10 @@
 }
 
 /* ── Wand 메뉴 항목 ───────────────────────────────────── */
-#pol-wand-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-}
-#pol-wand-item:hover {
-    background: rgba(255,255,255,.08);
-}
+/* flex/정렬/hover는 이제 함께 붙인 ST 기본 클래스(list-group-item flex-container
+   flexGap5 interactable)가 담당하므로, 여기서 따로 지정하지 않는다. 예전엔 직접
+   flex/hover를 지정했었는데, 그게 테마 색상과 안 맞아서 다른 메뉴 항목들과 스타일이
+   따로 노는 원인이었음. */
 
 /* ── 스크롤바 ─────────────────────────────────────────── */
 .pol-grid::-webkit-scrollbar { width: 5px; }

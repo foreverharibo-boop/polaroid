@@ -988,12 +988,12 @@ function showDirectionPopup() {
         overlay.className = 'pol-dir-overlay';
         overlay.innerHTML = `
             <div class="pol-dir-box">
-                <div class="pol-dir-title"><i class="fa-solid fa-camera-retro"></i> 📷 Polaroid 생성</div>
+                <div class="pol-dir-title"><i class="fa-solid fa-camera"></i> 📷 Polaroid 생성</div>
                 <div class="pol-dir-desc">원하는 자세나 장면을 한 줄로 지시해주세요.<br><span class="pol-dir-sub">비워두면 채팅 내용만으로 자동 생성합니다.</span></div>
                 <input id="pol-dir-input" class="pol-dir-input" type="text" placeholder="예: 창문 앞에서 뒤돌아보는 모습, 환하게 웃으며 손 흔드는 장면…" maxlength="200" />
                 <div class="pol-dir-btns">
                     <button id="pol-dir-cancel" class="pol-dir-btn pol-dir-btn-cancel">취소</button>
-                    <button id="pol-dir-ok" class="pol-dir-btn pol-dir-btn-ok"><i class="fa-solid fa-camera-retro"></i> 생성</button>
+                    <button id="pol-dir-ok" class="pol-dir-btn pol-dir-btn-ok"><i class="fa-solid fa-camera"></i> 생성</button>
                 </div>
             </div>`;
 
@@ -1173,7 +1173,7 @@ function openGallery() {
             <div class="pol-modal-box">
                 <div class="pol-modal-head">
                     <div class="pol-modal-title">
-                        <i class="fa-solid fa-camera-retro"></i> Polaroid Album
+                        <i class="fa-solid fa-camera"></i> Polaroid Album
                     </div>
                     <select id="pol-char-sel" class="pol-char-select">
                         <option value="">캐릭터 선택…</option>
@@ -1282,9 +1282,9 @@ function addBtn(mesEl) {
     if (mesEl.querySelector('.pol-msg-btn')) return;
 
     const btn = document.createElement('div');
-    btn.className = 'pol-msg-btn';
+    btn.className = 'pol-msg-btn mes_button';
     btn.setAttribute('title', '📷 Polaroid');
-    btn.innerHTML = '<i class="fa-solid fa-camera-retro"></i>';
+    btn.innerHTML = '<i class="fa-solid fa-camera"></i>';
     // 터치 환경에서 부모가 포인터 이벤트를 먹는 경우 대비: touch-action 명시
     btn.style.cssText += 'touch-action:manipulation;cursor:pointer;';
 
@@ -1484,10 +1484,11 @@ function injectWandMenu() {
         if (!menu) return false;
         if (menu.querySelector('#pol-wand-item')) return true;
 
-        const li = document.createElement('li');
+        const li = document.createElement('div');
         li.id = 'pol-wand-item';
-        li.innerHTML = `<i class="fa-solid fa-camera-retro"></i> Polaroid`;
-        li.style.cssText = 'cursor:pointer; padding: 5px 16px; display:flex; align-items:center; gap:8px;';
+        li.classList.add('list-group-item', 'flex-container', 'flexGap5', 'interactable');
+        li.tabIndex = 0;
+        li.innerHTML = `<i class="fa-solid fa-camera"></i><span>Polaroid</span>`;
         bindTap(li, (e) => {
             e.stopPropagation();
             // 메뉴 닫기
