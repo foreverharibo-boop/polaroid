@@ -1282,9 +1282,12 @@ function addBtn(mesEl) {
     if (mesEl.querySelector('.pol-msg-btn')) return;
 
     const btn = document.createElement('div');
-    btn.className = 'pol-msg-btn mes_button';
+    // ST의 다른 mes_button들(예: 리롤, 편집 등)은 보통 <div class="mes_button fa-solid fa-아이콘">
+    // 형태로 아이콘 클래스가 엘리먼트 자체에 바로 붙어있고 내부에 별도 <i> 태그가 없음.
+    // 안에 <i>를 한 겹 더 감싸면 줄 높이 계산이 미묘하게 달라져서 옆 아이콘들과 세로
+    // 정렬이 살짝 어긋나 보이는 원인이 됐음 — 구조를 완전히 동일하게 맞춘다.
+    btn.className = 'pol-msg-btn mes_button fa-solid fa-camera interactable';
     btn.setAttribute('title', '📷 Polaroid');
-    btn.innerHTML = '<i class="fa-solid fa-camera"></i>';
     // 터치 환경에서 부모가 포인터 이벤트를 먹는 경우 대비: touch-action 명시
     btn.style.cssText += 'touch-action:manipulation;cursor:pointer;';
 
