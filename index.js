@@ -14,6 +14,7 @@ import { saveSettingsDebounced, eventSource, event_types } from '../../../../scr
 //  파일을 아무리 고쳐도 화면엔 반영되지 않는 상태가 됨 — 지금은 style.css가 유일한
 //  진짜 스타일 소스이고, 여기서 그 파일을 그대로 읽어와서 적용함)
 async function injectStyles() {
+    ensureCriticalDialogStyle(); // style.css 로딩 성공 여부와 무관하게 항상 먼저 주입
     if (document.getElementById('pol-injected-css')) return;
     try {
         const cssUrl = new URL('./style.css', import.meta.url).href;
@@ -28,6 +29,30 @@ async function injectStyles() {
         console.warn('[Polaroid] style.css 로드 실패, 최소 폴백 스타일 사용:', e);
         ensureFallbackStyles();
     }
+}
+
+// ── <dialog> 관련 필수 CSS는 항상 주입 (style.css 로딩 성공 여부와 무관) ──────
+// <dialog>는 기본적으로 브라우저가 테두리/패딩/배경을 강제로 넣어주는데, 우리 커스텀
+// 디자인(.pol-modal-box 등)과 겹쳐 이중으로 보이는 걸 막기 위해 리셋이 필요함.
+// 또한 배경을 어둡게 깔아주는 ::backdrop은 인라인 style 속성으로는 절대 지정할 수
+// 없고(가상 요소라 엘리먼트 자신의 style 속성 대상이 아님) 반드시 <style> 태그의
+// CSS 규칙으로만 지정 가능하므로, style.css 로드 여부와 무관하게 항상 이 함수로
+// 보장해둔다.
+function ensureCriticalDialogStyle() {
+    if (document.getElementById('pol-critical-css')) return;
+    const style = document.createElement('style');
+    style.id = 'pol-critical-css';
+    style.textContent = `
+#pol-gallery-modal, #pol-full, #pol-direction-popup {
+    border: none; padding: 0; background: transparent; color: inherit;
+    max-width: none; max-height: none; margin: auto; overflow: visible;
+}
+#pol-gallery-modal::backdrop, #pol-full::backdrop, #pol-direction-popup::backdrop {
+    background: rgba(0,0,0,.45);
+}
+#pol-full::backdrop { background: rgba(0,0,0,.78); }
+`;
+    document.head.appendChild(style);
 }
 
 const EXT = 'polaroid';
@@ -983,13 +1008,15 @@ function showDirectionPopup() {
             document.getElementById('pol-direction-popup')?.remove();
         }
 
-        const overlay = document.createElement('div');
+        // ── <dialog> + showModal() 사용 ─────────────────────────────
+        // 기존엔 <div>+position:fixed로 직접 만들었는데, 조상 요소 중 하나에
+        // transform(또는 filter/will-change)이 걸려있으면 position:fixed의 기준이
+        // "화면 전체"가 아니라 "그 조상 요소"로 바뀌어버리는 CSS 스펙상의 함정이 있음.
+        // <dialog>.showModal()은 브라우저의 "top layer"라는 별도 레이어에 렌더링되기
+        // 때문에 조상에 뭐가 걸려있든 무조건 화면 기준으로 뜨는 게 스펙으로 보장됨.
+        const overlay = document.createElement('dialog');
         overlay.id = 'pol-direction-popup';
         overlay.className = 'pol-dir-overlay';
-        // ── style.css가 무슨 이유로든 안 먹는 세션에서도 항상 화면 중앙에 뜨도록,
-        // 위치/배경 관련 핵심 스타일만 인라인으로 이중 안전장치를 걸어둠. 인라인
-        // 스타일이라 외부 CSS 로드 성공 여부와 완전히 무관하게 항상 적용됨.
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;';
         overlay.innerHTML = `
             <div class="pol-dir-box">
                 <div class="pol-dir-title"><i class="fa-solid fa-camera"></i> 📷 Polaroid 생성</div>
@@ -1002,6 +1029,7 @@ function showDirectionPopup() {
             </div>`;
 
         document.body.appendChild(overlay);
+        overlay.showModal();
         lockBodyScroll();
 
         const input = overlay.querySelector('#pol-dir-input');
@@ -1014,11 +1042,13 @@ function showDirectionPopup() {
         const confirm = () => {
             const val = input.value.trim();
             unlockBodyScroll();
+            try { overlay.close(); } catch(_) {}
             overlay.remove();
             resolve(val);
         };
         const cancel = () => {
             unlockBodyScroll();
+            try { overlay.close(); } catch(_) {}
             overlay.remove();
             resolve(null);
         };
@@ -1170,12 +1200,9 @@ function openGallery() {
         const curChar = ctx.characters?.[ctx.characterId]?.name || '';
         const chars = await allGalleryChars();
 
-        const modal = document.createElement('div');
+        const modal = document.createElement('dialog');
         modal.id = 'pol-gallery-modal';
         modal.className = 'pol-modal';
-        // ── style.css 로드 실패/미적용 세션에서도 항상 화면 중앙에 어두운 배경과
-        // 함께 뜨도록 핵심 위치 스타일을 인라인으로 이중 안전장치 걸어둠.
-        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.innerHTML = `
             <div class="pol-modal-box">
                 <div class="pol-modal-head">
@@ -1193,8 +1220,9 @@ function openGallery() {
             </div>`;
 
         document.body.appendChild(modal);
+        modal.showModal();
         lockBodyScroll();
-        const closeModal = () => { unlockBodyScroll(); modal.remove(); };
+        const closeModal = () => { unlockBodyScroll(); try { modal.close(); } catch(_) {} modal.remove(); };
         bindTap(modal, e => { if (e.target === modal) closeModal(); });
         bindTap(modal.querySelector('#pol-modal-close'), closeModal);
 
@@ -1260,11 +1288,9 @@ function openFull(src, name, timestamp) {
         unlockBodyScroll();
         document.getElementById('pol-full')?.remove();
     }
-    const el = document.createElement('div');
+    const el = document.createElement('dialog');
     el.id = 'pol-full';
     el.className = 'pol-full';
-    // ── style.css 로드 실패/미적용 세션에서도 항상 화면 중앙에 뜨도록 인라인 이중 안전장치
-    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;';
     const dateStr = timestamp ? new Date(timestamp).toLocaleDateString('ko-KR') : '';
     el.innerHTML = `
         <div class="pol-full-inner">
@@ -1275,10 +1301,11 @@ function openFull(src, name, timestamp) {
             </div>
             <button class="pol-full-close"><i class="fa-solid fa-xmark"></i></button>
         </div>`;
-    const closeFull = () => { unlockBodyScroll(); el.remove(); };
+    const closeFull = () => { unlockBodyScroll(); try { el.close(); } catch(_) {} el.remove(); };
     bindTap(el.querySelector('.pol-full-close'), closeFull);
     bindTap(el, e => { if (e.target === el) closeFull(); });
     document.body.appendChild(el);
+    el.showModal();
     lockBodyScroll();
 }
 
