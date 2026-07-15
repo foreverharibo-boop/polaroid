@@ -1406,11 +1406,11 @@ async function setupSettings() {
                         <label>네거티브 프롬프트</label>
                         <input type="text" id="pol-neg" class="text_pole" value="${c.negative_prompt}" />
 
-                        <div style="display:flex;gap:8px;margin-top:8px;">
-                            <button id="pol-save-btn" class="menu_button menu_button_active">
+                        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                            <button id="pol-save-btn" class="menu_button menu_button_active" style="flex:1;white-space:nowrap;min-width:fit-content;">
                                 <i class="fa-solid fa-floppy-disk"></i> 저장
                             </button>
-                            <button id="pol-gallery-open-btn" class="menu_button">
+                            <button id="pol-gallery-open-btn" class="menu_button" style="flex:1;white-space:nowrap;min-width:fit-content;">
                                 <i class="fa-solid fa-images"></i> 갤러리 열기
                             </button>
                         </div>
