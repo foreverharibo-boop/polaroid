@@ -986,14 +986,18 @@ function showDirectionPopup() {
         const overlay = document.createElement('div');
         overlay.id = 'pol-direction-popup';
         overlay.className = 'pol-dir-overlay';
+        // ── style.css가 무슨 이유로든 안 먹는 세션에서도 항상 화면 중앙에 뜨도록,
+        // 위치/배경 관련 핵심 스타일만 인라인으로 이중 안전장치를 걸어둠. 인라인
+        // 스타일이라 외부 CSS 로드 성공 여부와 완전히 무관하게 항상 적용됨.
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;';
         overlay.innerHTML = `
             <div class="pol-dir-box">
-                <div class="pol-dir-title"><i class="fa-solid fa-camera-retro"></i> 📷 Polaroid 생성</div>
+                <div class="pol-dir-title"><i class="fa-solid fa-camera"></i> 📷 Polaroid 생성</div>
                 <div class="pol-dir-desc">원하는 자세나 장면을 한 줄로 지시해주세요.<br><span class="pol-dir-sub">비워두면 채팅 내용만으로 자동 생성합니다.</span></div>
                 <input id="pol-dir-input" class="pol-dir-input" type="text" placeholder="예: 창문 앞에서 뒤돌아보는 모습, 환하게 웃으며 손 흔드는 장면…" maxlength="200" />
                 <div class="pol-dir-btns">
                     <button id="pol-dir-cancel" class="pol-dir-btn pol-dir-btn-cancel">취소</button>
-                    <button id="pol-dir-ok" class="pol-dir-btn pol-dir-btn-ok"><i class="fa-solid fa-camera-retro"></i> 생성</button>
+                    <button id="pol-dir-ok" class="pol-dir-btn pol-dir-btn-ok"><i class="fa-solid fa-camera"></i> 생성</button>
                 </div>
             </div>`;
 
@@ -1169,11 +1173,14 @@ function openGallery() {
         const modal = document.createElement('div');
         modal.id = 'pol-gallery-modal';
         modal.className = 'pol-modal';
+        // ── style.css 로드 실패/미적용 세션에서도 항상 화면 중앙에 어두운 배경과
+        // 함께 뜨도록 핵심 위치 스타일을 인라인으로 이중 안전장치 걸어둠.
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;';
         modal.innerHTML = `
             <div class="pol-modal-box">
                 <div class="pol-modal-head">
                     <div class="pol-modal-title">
-                        <i class="fa-solid fa-camera-retro"></i> Polaroid Album
+                        <i class="fa-solid fa-camera"></i> Polaroid Album
                     </div>
                     <select id="pol-char-sel" class="pol-char-select">
                         <option value="">캐릭터 선택…</option>
@@ -1256,6 +1263,8 @@ function openFull(src, name, timestamp) {
     const el = document.createElement('div');
     el.id = 'pol-full';
     el.className = 'pol-full';
+    // ── style.css 로드 실패/미적용 세션에서도 항상 화면 중앙에 뜨도록 인라인 이중 안전장치
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;';
     const dateStr = timestamp ? new Date(timestamp).toLocaleDateString('ko-KR') : '';
     el.innerHTML = `
         <div class="pol-full-inner">
@@ -1282,9 +1291,12 @@ function addBtn(mesEl) {
     if (mesEl.querySelector('.pol-msg-btn')) return;
 
     const btn = document.createElement('div');
-    btn.className = 'pol-msg-btn';
+    // ST의 다른 mes_button들(예: 리롤, 편집 등)은 보통 <div class="mes_button fa-solid fa-아이콘">
+    // 형태로 아이콘 클래스가 엘리먼트 자체에 바로 붙어있고 내부에 별도 <i> 태그가 없음.
+    // 안에 <i>를 한 겹 더 감싸면 줄 높이 계산이 미묘하게 달라져서 옆 아이콘들과 세로
+    // 정렬이 살짝 어긋나 보이는 원인이 됐음 — 구조를 완전히 동일하게 맞춘다.
+    btn.className = 'pol-msg-btn mes_button fa-solid fa-camera interactable';
     btn.setAttribute('title', '📷 Polaroid');
-    btn.innerHTML = '<i class="fa-solid fa-camera-retro"></i>';
     // 터치 환경에서 부모가 포인터 이벤트를 먹는 경우 대비: touch-action 명시
     btn.style.cssText += 'touch-action:manipulation;cursor:pointer;';
 
@@ -1403,11 +1415,11 @@ async function setupSettings() {
                         <label>네거티브 프롬프트</label>
                         <input type="text" id="pol-neg" class="text_pole" value="${c.negative_prompt}" />
 
-                        <div style="display:flex;gap:8px;margin-top:8px;">
-                            <button id="pol-save-btn" class="menu_button menu_button_active">
+                        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                            <button id="pol-save-btn" class="menu_button menu_button_active" style="flex:1;white-space:nowrap;min-width:fit-content;">
                                 <i class="fa-solid fa-floppy-disk"></i> 저장
                             </button>
-                            <button id="pol-gallery-open-btn" class="menu_button">
+                            <button id="pol-gallery-open-btn" class="menu_button" style="flex:1;white-space:nowrap;min-width:fit-content;">
                                 <i class="fa-solid fa-images"></i> 갤러리 열기
                             </button>
                         </div>
@@ -1484,10 +1496,11 @@ function injectWandMenu() {
         if (!menu) return false;
         if (menu.querySelector('#pol-wand-item')) return true;
 
-        const li = document.createElement('li');
+        const li = document.createElement('div');
         li.id = 'pol-wand-item';
-        li.innerHTML = `<i class="fa-solid fa-camera-retro"></i> Polaroid`;
-        li.style.cssText = 'cursor:pointer; padding: 5px 16px; display:flex; align-items:center; gap:8px;';
+        li.classList.add('list-group-item', 'flex-container', 'flexGap5', 'interactable');
+        li.tabIndex = 0;
+        li.innerHTML = `<i class="fa-solid fa-camera"></i><span>Polaroid</span>`;
         bindTap(li, (e) => {
             e.stopPropagation();
             // 메뉴 닫기
