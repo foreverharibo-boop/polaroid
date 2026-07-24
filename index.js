@@ -296,7 +296,9 @@ async function refresh() {
     try {
         state = await api('/state');
     } catch (e) {
-        $('.chatlog-body').html(`<div class="chatlog-empty">불러오기 실패<br><small>${esc(e.message)}</small></div>`);
+        $('.chatlog-body').html(
+            `<div class="chatlog-empty">서버 플러그인에 연결하지 못했어요<br>` +
+            `<small>plugins/chatlog 설치와 ST 재시작을 확인해주세요<br>${esc(e.message)}</small></div>`);
         return;
     }
     render();
