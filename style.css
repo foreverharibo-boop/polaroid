@@ -1,402 +1,413 @@
-/* ════════════════════════════════════════
-   📷 Polaroid Extension  –  Photo Album style
-   ════════════════════════════════════════ */
+/* ==========================================================
+   챗로그 — 앱 디자인 이식
+   · 검은 배경 / 흰 텍스트 / 라운드 풀블리드 사진 카드
+   · 좌상단 시간 스탬프, 하단 캡션, 사진 아래 둥둥 뜨는 댓글
+   · 오버레이는 <html>에 append → MovingUI transform 무시, 뷰포트 정중앙
+   · 흐림·그림자 전면 제거
+   ========================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500&display=swap');
+html > .chatlog-overlay,
+html > .chatlog-sheet {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0 !important;
 
-/* ── 메시지 버튼 ─────────────────────────────────────────── */
-/* 크기·정렬은 함께 붙인 ST 기본 클래스 mes_button이 담당하게 두고(다른 아이콘들과
-   자동으로 정렬을 맞추기 위함), 여기선 색상 강조만 얹는다. 예전엔 width/height를
-   24px로 고정해놨었는데, 그 고정 크기가 옆 아이콘들의 자연스러운 크기와 달라서
-   줄이 어긋나 보이는 원인이었음. */
-.pol-msg-btn {
-    color: var(--SmartThemeBodyColor, #ccc);
-    transition: color .2s;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    background: rgba(0, 0, 0, 0.82) !important;
+
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    filter: none !important;
+    transform: none !important;
+    box-shadow: none !important;
 }
-.pol-msg-btn:hover { color: #d4a017 !important; }
 
-/* ── 인라인 폴라로이드 ───────────────────────────────────── */
-.polaroid-wrap {
+html > .chatlog-overlay { z-index: 100000 !important; }
+html > .chatlog-sheet { z-index: 100010 !important; }
+
+/* 내부 전체에서 흐림·그림자 차단 */
+html > .chatlog-overlay *,
+html > .chatlog-sheet * {
+    text-shadow: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* ── 앱 셸 ─────────────────────────────────────────────── */
+.chatlog-app {
+    position: relative !important;
+    margin: 0 !important;
+    inset: auto !important;
+    transform: none !important;
+
+    width: min(96vw, 460px);
+    height: min(92dvh, 860px);
     display: flex;
-    justify-content: center;
-    margin-top: 16px;
-    animation: pol-drop .45s cubic-bezier(.34,1.56,.64,1);
-}
-@keyframes pol-drop {
-    from { opacity:0; transform: translateY(-12px) rotate(-4deg) scale(.88); }
-    to   { opacity:1; transform: translateY(0) rotate(-1.5deg) scale(1); }
-}
-
-.pol-frame {
-    background: #ffffff;
-    padding: 10px 10px 38px;
-    box-shadow: 0 6px 24px rgba(0,0,0,.28), 0 1px 4px rgba(0,0,0,.12);
-    transform: rotate(-1.5deg);
-    max-width: 260px;
-    width: 100%;
-    transition: transform .25s ease, box-shadow .25s ease;
-    border-radius: 1px;
-}
-.pol-frame:hover {
-    transform: rotate(0deg) scale(1.04);
-    box-shadow: 0 14px 36px rgba(0,0,0,.32);
-    z-index: 10;
-}
-.pol-img {
-    width: 100%;
-    display: block;
-    object-fit: cover;
-    aspect-ratio: 1/1;
-    cursor: pointer;
-    border-radius: 1px;
-}
-.pol-name {
-    font-family: 'Caveat', cursive, sans-serif;
-    font-size: 15px;
-    color: #2c2c2c;
-    text-align: center;
-    margin-top: 10px;
-    letter-spacing: .3px;
-}
-.pol-hint {
-    font-size: 9px;
-    color: #aaa;
-    text-align: center;
-    margin-top: 3px;
-    padding: 0 4px;
+    flex-direction: column;
     overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-.pol-actions {
-    display: flex;
-    justify-content: center;
-    gap: 6px;
-    margin-top: 7px;
-}
-.pol-btn {
-    background: rgba(0,0,0,.06);
-    border: none;
-    border-radius: 5px;
-    padding: 4px 10px;
-    font-size: 11px;
-    cursor: pointer;
-    color: #444;
-    transition: background .15s;
-}
-.pol-btn:hover { background: rgba(0,0,0,.13); }
 
-/* ══════════════════════════════════════════
-   갤러리 모달  –  Photo Album / 화이트 클린
-   ══════════════════════════════════════════ */
-.pol-modal {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,.45);
-    z-index: 2147483647;
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px;
-    backdrop-filter: blur(8px) saturate(1.2);
-    -webkit-backdrop-filter: blur(8px) saturate(1.2);
+    background: #0a0a0a;
+    color: #f2f2f2;
+    border-radius: 22px;
+    border: 1px solid #1e1e1e;
+
+    font-family: -apple-system, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    letter-spacing: -0.02em;
 }
 
-.pol-modal-box {
-    background: #fafaf8;
-    border-radius: 16px;
-    width: 100%; max-width: 920px;
-    max-height: 90vh;
-    max-height: 90dvh;
-    display: flex; flex-direction: column;
-    overflow: hidden;
-    box-shadow:
-        0 24px 64px rgba(0,0,0,.18),
-        0 0 0 1px rgba(0,0,0,.07);
-}
-
-/* 타이틀바 — 화이트 베이스 */
-.pol-modal-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 18px;
-    background: #ffffff;
-    border-bottom: 1px solid #e8e5df;
-    border-radius: 16px 16px 0 0;
-    min-height: 52px;
-    user-select: none;
-    gap: 12px;
-}
-
-.pol-modal-title {
-    font-family: 'Caveat', cursive, sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    color: #2c2c2c;
-    letter-spacing: .3px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex: 1;
-}
-
-/* 닫기 버튼 — 오른쪽 위 */
-.pol-modal-close-btn {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    border: none;
-    background: #f0ede7;
-    color: #666;
-    font-size: 14px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background .15s, color .15s;
-    flex-shrink: 0;
-    touch-action: manipulation;
-}
-.pol-modal-close-btn:hover {
-    background: #e8e0d5;
-    color: #222;
-}
-
-.pol-char-select {
-    background: #f5f2ec;
-    border: 1px solid #ddd9d0;
-    border-radius: 8px;
-    padding: 5px 12px;
-    font-size: 13px;
-    color: #2c2c2c;
-    min-width: 160px;
-    outline: none;
-    cursor: pointer;
-}
-.pol-char-select:focus {
-    border-color: #c8a96e;
-    box-shadow: 0 0 0 3px rgba(200,169,110,.2);
-}
-
-/* 그리드 영역 */
-.pol-grid {
+.chatlog-head {
+    flex: 0 0 auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 24px;
-    padding: 24px;
-    overflow-y: auto;
-    flex: 1;
-    background: #fafaf8;
+    grid-template-columns: 32px 1fr 32px;
+    align-items: center;
+    padding: 14px 14px 10px;
 }
 
-.pol-empty {
-    grid-column: 1/-1;
+.chatlog-title {
     text-align: center;
-    color: #b0a898;
-    padding: 60px 0;
-    font-size: 14px;
-    font-family: 'Caveat', cursive, sans-serif;
-    font-size: 17px;
+    font-weight: 700;
+    font-size: 1.02em;
 }
 
-/* 갤러리 카드 */
-.pol-card { }
-
-.pol-frame-sm {
-    background: #ffffff;
-    padding: 8px 8px 34px;
-    box-shadow:
-        0 2px 10px rgba(0,0,0,.10),
-        0 0 0 1px rgba(0,0,0,.05);
-    max-width: none; width: 100%;
-    transform: rotate(var(--t, -1deg));
-    cursor: default;
-    border-radius: 1px;
-    transition: transform .22s ease, box-shadow .22s ease;
-}
-.pol-card:nth-child(2n) .pol-frame-sm { --t: 1.3deg; }
-.pol-card:nth-child(3n) .pol-frame-sm { --t: -0.5deg; }
-.pol-card:nth-child(4n) .pol-frame-sm { --t: 2.1deg; }
-.pol-card:nth-child(5n) .pol-frame-sm { --t: -1.8deg; }
-
-.pol-frame-sm:hover {
-    transform: rotate(0deg) scale(1.05) !important;
-    box-shadow: 0 8px 28px rgba(0,0,0,.14), 0 0 0 1px rgba(0,0,0,.06);
-    z-index: 5;
-}
-
-.pol-img-thumb { cursor: zoom-in !important; }
-.pol-date {
-    font-size: 9px;
-    color: #c0b8ae;
-    text-align: center;
-    margin-top: 3px;
-    letter-spacing: .2px;
-}
-
-/* ── 전체화면 뷰어 ─────────────────────────────────────── */
-.pol-full {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,.78);
-    z-index: 2147483647;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-}
-.pol-full-inner {
-    position: relative;
-    max-width: 700px; width: 100%;
-    background: #ffffff;
-    padding: 12px 12px 50px;
-    box-shadow: 0 24px 72px rgba(0,0,0,.45);
-    transform: rotate(-.4deg);
-    border-radius: 1px;
-}
-.pol-full-inner img {
-    width: 100%; display: block;
-    object-fit: contain; max-height: 66vh;
-    border-radius: 1px;
-}
-.pol-full-info {
-    text-align: center; margin-top: 12px;
-    font-family: 'Caveat', cursive, sans-serif;
-}
-.pol-full-info strong {
-    font-size: 20px; display: block; color: #1d1d1f;
-}
-.pol-full-info p {
-    font-size: 11px; color: #8e8e93; margin-top: 5px;
-    padding: 0 8px;
-    line-height: 1.5;
-}
-.pol-full-close {
-    position: absolute; top: -14px; right: -14px;
-    width: 30px; height: 30px; border-radius: 50%;
-    background: #e8e0d5; border: none; color: #444;
-    cursor: pointer; font-size: 13px;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,.15);
-    transition: background .15s;
-}
-.pol-full-close:hover { background: #ddd4c5; }
-
-/* ── 설정 패널 ────────────────────────────────────────── */
-.pol-settings {
-    display: flex; flex-direction: column;
-    gap: 7px; padding: 6px 0;
-}
-.pol-settings label {
-    font-size: 12px; color: #bbb; margin-bottom: 1px;
-}
-
-/* ── Wand 메뉴 항목 ───────────────────────────────────── */
-/* flex/정렬/hover는 이제 함께 붙인 ST 기본 클래스(list-group-item flex-container
-   flexGap5 interactable)가 담당하므로, 여기서 따로 지정하지 않는다. 예전엔 직접
-   flex/hover를 지정했었는데, 그게 테마 색상과 안 맞아서 다른 메뉴 항목들과 스타일이
-   따로 노는 원인이었음. */
-
-/* ── 스크롤바 ─────────────────────────────────────────── */
-.pol-grid::-webkit-scrollbar { width: 5px; }
-.pol-grid::-webkit-scrollbar-track { background: transparent; }
-.pol-grid::-webkit-scrollbar-thumb {
-    background: #d8d2c8;
-    border-radius: 3px;
-}
-.pol-grid::-webkit-scrollbar-thumb:hover { background: #c8c0b4; }
-
-/* ── 생성 지시 팝업 ───────────────────────────────────── */
-.pol-dir-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,.40);
-    z-index: 2147483647;
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-}
-.pol-dir-box {
-    background: #ffffff;
-    border-radius: 16px;
-    padding: 24px 24px 20px;
-    width: 100%; max-width: 420px;
-    box-shadow: 0 16px 48px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.06);
-    display: flex; flex-direction: column; gap: 14px;
-}
-.pol-dir-title {
-    font-family: 'Caveat', cursive, sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    color: #2c2c2c;
-    display: flex; align-items: center; gap: 8px;
-}
-.pol-dir-desc {
-    font-size: 13px;
-    color: #555;
-    line-height: 1.6;
-}
-.pol-dir-sub {
-    font-size: 11px;
-    color: #aaa;
-}
-.pol-dir-input {
-    width: 100%;
-    border: 1.5px solid #e0dcd4;
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 14px;
-    color: #2c2c2c;
-    background: #faf9f7;
-    outline: none;
-    box-sizing: border-box;
-    transition: border-color .15s, box-shadow .15s;
-}
-.pol-dir-input:focus {
-    border-color: #c8a96e;
-    box-shadow: 0 0 0 3px rgba(200,169,110,.18);
-    background: #ffffff;
-}
-.pol-dir-btns {
-    display: flex; gap: 10px; justify-content: flex-end;
-}
-.pol-dir-btn {
-    padding: 9px 20px;
-    border-radius: 10px;
-    border: none;
-    font-size: 13px;
-    font-weight: 600;
+.chatlog-back, .chatlog-close {
     cursor: pointer;
-    transition: background .15s;
-    touch-action: manipulation;
+    opacity: 0.55;
+    font-size: 0.95em;
+    text-align: center;
 }
-.pol-dir-btn-cancel {
-    background: #f0ede7;
-    color: #666;
+.chatlog-back:hover, .chatlog-close:hover { opacity: 1; }
+.chatlog-back.hidden { visibility: hidden; }
+
+.chatlog-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 12px 28px;
 }
-.pol-dir-btn-cancel:hover { background: #e8e2d8; }
-.pol-dir-btn-ok {
-    background: #2c2c2c;
+
+.chatlog-empty {
+    text-align: center;
+    opacity: 0.45;
+    padding: 60px 20px;
+    line-height: 1.7;
+    font-size: 0.92em;
+}
+
+/* ── 로그 목록 ─────────────────────────────────────────── */
+.chatlog-roomcard {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 6px;
+    cursor: pointer;
+    position: relative;
+}
+
+.chatlog-roomthumb {
+    width: 54px; height: 54px;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #171717;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    opacity: 0.95;
+}
+.chatlog-roomthumb img { width: 100%; height: 100%; object-fit: cover; }
+.chatlog-roomthumb span { opacity: 0.3; }
+
+.chatlog-roomname { font-weight: 650; font-size: 0.98em; }
+.chatlog-roomsub { font-size: 0.78em; opacity: 0.42; margin-top: 3px; }
+
+.chatlog-badge {
+    margin-left: auto;
+    background: #ff4a3d;
     color: #fff;
-    display: flex; align-items: center; gap: 7px;
+    font-size: 0.7em;
+    font-weight: 700;
+    min-width: 19px; height: 19px; line-height: 19px;
+    border-radius: 999px;
+    text-align: center;
+    padding: 0 6px;
 }
-.pol-dir-btn-ok:hover { background: #444; }
 
-/* ── 모바일 ───────────────────────────────────────────── */
-/* 오버레이(.pol-modal / .pol-full / .pol-dir-overlay)가 모바일에서 화면 위쪽으로
-   쏠려 보이던 문제는 대부분 "position:fixed 상태에서 배경 페이지가 스크롤된 채로 유지되는"
-   iOS/안드로이드 브라우저 버그가 원인이라, 실제 수정은 JS의 lockBodyScroll()/unlockBodyScroll()
-   (오버레이 여는 동안 body 스크롤을 잠그는 방식)에서 처리함. 아래는 그걸 보강하는 CSS. */
-@media (max-width: 600px) {
-    .pol-frame { max-width: 220px; }
-    .pol-grid {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 16px; padding: 16px;
-    }
-    .pol-modal-head { flex-wrap: wrap; gap: 8px; }
-    .pol-dir-box { padding: 20px 18px 16px; }
+.chatlog-newroom {
+    margin-top: 14px;
+    padding: 14px;
+    text-align: center;
+    border: 1px dashed #262626;
+    border-radius: 16px;
+    opacity: 0.5;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+.chatlog-newroom:hover { opacity: 0.85; }
 
-    .pol-modal, .pol-full, .pol-dir-overlay {
-        /* 주소창 접힘/펼침으로 100vh가 실제 보이는 영역보다 커지는 문제 방지 */
-        height: 100dvh;
-        height: 100svh;
-    }
-    .pol-modal-box {
-        max-height: 100dvh;
-        max-height: 100svh;
-    }
+/* ── 툴바 ──────────────────────────────────────────────── */
+.chatlog-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 4px 2px 12px;
+    position: sticky;
+    top: 0;
+    background: #0a0a0a;
+    z-index: 2;
+}
+
+.chatlog-chip {
+    flex: 1;
+    text-align: center;
+    padding: 9px;
+    border-radius: 999px;
+    background: #161616;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+.chatlog-chip:hover { background: #202020; }
+
+.chatlog-daysep {
+    text-align: center;
+    font-size: 0.74em;
+    opacity: 0.32;
+    margin: 18px 0 10px;
+    letter-spacing: 0.02em;
+}
+
+/* ── 게시물 카드 ───────────────────────────────────────── */
+.chatlog-post { margin-bottom: 22px; }
+
+.chatlog-frame {
+    position: relative;
+    border-radius: 20px;
+    overflow: hidden;
+    background: #111;
+    aspect-ratio: 3 / 4;
+}
+
+.chatlog-photo {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.chatlog-nophoto {
+    background: linear-gradient(160deg, #1b1b1b, #101010);
+}
+
+/* 시간 스탬프 — 좌상단 알약 */
+.chatlog-stamp {
+    position: absolute;
+    top: 10px; left: 10px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 0.7em;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 999px;
+    letter-spacing: 0;
+}
+
+/* 작성자 — 우상단 */
+.chatlog-author {
+    position: absolute;
+    top: 10px; right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 3px 9px 3px 3px;
+    border-radius: 999px;
+    font-size: 0.72em;
+    font-weight: 600;
+}
+.chatlog-author img {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* 캡션 — 사진 하단 */
+.chatlog-caption {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 34px 14px 14px;
+    font-size: 0.95em;
+    font-weight: 550;
+    line-height: 1.4;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
+}
+
+/* ── 댓글 — 카드 아래 둥둥 ─────────────────────────────── */
+.chatlog-comments {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px 6px 0;
+}
+
+.chatlog-comment {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.chatlog-cavatar {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex: 0 0 auto;
+    margin-top: 1px;
+}
+
+.chatlog-cbubble {
+    background: #171717;
+    border-radius: 4px 16px 16px 16px;
+    padding: 8px 12px;
+    font-size: 0.85em;
+    line-height: 1.45;
+    max-width: 82%;
+}
+.chatlog-cbubble b {
+    display: block;
+    font-size: 0.85em;
+    opacity: 0.45;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.chatlog-comment.unread .chatlog-cbubble {
+    background: #1d1a15;
+    border: 1px solid #3a2f16;
+}
+
+/* ── 시트 (올리기 / 하루로그) ──────────────────────────── */
+.chatlog-sheet-inner {
+    position: relative !important;
+    margin: 0 !important;
+    width: min(94vw, 420px);
+    max-height: 88dvh;
+    overflow-y: auto;
+    background: #0f0f0f;
+    border: 1px solid #212121;
+    border-radius: 22px;
+    padding: 20px 18px;
+    color: #f2f2f2;
+    font-family: -apple-system, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    letter-spacing: -0.02em;
+}
+
+.chatlog-sheet-title {
+    font-weight: 700;
+    margin-bottom: 14px;
+    text-align: center;
+}
+
+.chatlog-preview {
+    aspect-ratio: 3 / 4;
+    border-radius: 18px;
+    background: #161616;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    opacity: 0.6;
+    overflow: hidden;
+}
+.chatlog-preview:hover { opacity: 0.9; }
+.chatlog-preview img { width: 100%; height: 100%; object-fit: cover; }
+.chatlog-preview small { font-size: 0.8em; }
+
+.chatlog-input {
+    width: 100%;
+    margin-top: 12px;
+    background: #161616;
+    border: none;
+    border-radius: 14px;
+    padding: 12px;
+    color: #f2f2f2;
+    font: inherit;
+    resize: none;
+}
+.chatlog-input::placeholder { color: #555; }
+
+.chatlog-sheet-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+}
+.chatlog-sheet-actions .menu_button { flex: 1; }
+
+/* ── 하루로그 분할 화면 ────────────────────────────────── */
+.chatlog-grid {
+    display: grid;
+    gap: 3px;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #000;
+}
+.chatlog-grid.g1 { grid-template-columns: 1fr; }
+.chatlog-grid.g2 { grid-template-columns: 1fr 1fr; }
+.chatlog-grid.g3 { grid-template-columns: 1fr 1fr 1fr; }
+
+.chatlog-cell {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+}
+.chatlog-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chatlog-cell .chatlog-stamp { top: 5px; left: 5px; font-size: 0.6em; padding: 2px 6px; }
+
+/* ── 캐릭터 선택 ───────────────────────────────────────── */
+.chatlog-charpick { max-height: 50vh; overflow-y: auto; text-align: left; }
+.chatlog-charrow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 4px; cursor: pointer;
+}
+.chatlog-charrow img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+
+/* ── 확장 탭 설정 ──────────────────────────────────────── */
+.chatlog-settings .chatlog-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.chatlog-settings .chatlog-row .text_pole { flex: 1 1 auto; min-width: 0; }
+.chatlog-settings .chatlog-actions { margin-top: 12px; }
+.chatlog-settings small { display: block; opacity: 0.6; margin: 2px 0 8px; line-height: 1.35; }
+.chatlog-settings label { display: block; margin-top: 10px; font-weight: 600; }
+
+/* ── 게시물 액션 ───────────────────────────────────────── */
+.chatlog-postactions {
+    display: flex;
+    gap: 14px;
+    padding: 9px 8px 0;
+    font-size: 0.76em;
+    opacity: 0.42;
+}
+.chatlog-act { cursor: pointer; }
+.chatlog-act:hover { opacity: 1; }
+.chatlog-act.on { opacity: 1; color: #ffcf5c; }
+.chatlog-postactions [data-act="del"] { margin-left: auto; }
+
+/* ── 진행 표시 ─────────────────────────────────────────── */
+.chatlog-progress {
+    text-align: center;
+    font-size: 0.78em;
+    opacity: 0.5;
+    min-height: 16px;
+    margin-top: 8px;
+}
+.chatlog-export.busy { opacity: 0.5; pointer-events: none; }
+.chatlog-export.disabled { opacity: 0.3; pointer-events: none; }
+
+/* 설정 탭 프로필 새로고침 버튼 */
+.chatlog-settings #chatlog-profile-refresh {
+    flex: 0 0 auto;
+    padding: 6px 10px;
 }
