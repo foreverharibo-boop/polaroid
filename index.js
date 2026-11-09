@@ -1,3 +1,4 @@
+import { migrationTurn, createAssetStore } from './file-assets.mjs';
 /**
  * 📷 Polaroid - SillyTavern Extension
  * Vertex AI Express (연결 프로필 or 직접 키) 방식으로 이미지 생성
@@ -821,19 +822,56 @@ async function getCharacterInfo() {
     return info;
 }
 
-// ── 갤러리 저장/불러오기 (ST 서버 저장 — 기기 간 동기화) ──────
-// ST의 /api/userdata 엔드포인트 사용 (확장에서 접근 가능한 공식 경로).
-// 인덱스 파일(user/polaroid/index.json)에 id 목록을 관리하고,
-// 각 사진은 user/polaroid/photos/{id}.json 으로 저장.
-// → 컴·폰 모두 같은 ST 서버를 바라보므로 갤러리가 자동으로 동기화됨.
-
-const GALLERY_PREFIX = 'polaroid_v1_'; // 구버전 localStorage 마이그레이션용
-// ── 갤러리 저장소: extension_settings 사용 ──────────────────────
-// 예전엔 /api/userdata 라는, 실제로는 존재하지 않는 엔드포인트를 불렀었음 (항상 실패
-// → 매번 IndexedDB로 폴백). extension_settings + saveSettingsDebounced()는 이 확장의
-// API 키/스타일 설정을 저장할 때 이미 검증된, ST 코어가 보장하는 진짜 저장 경로라서
-// 이걸로 통일함. settings.json에 이미지까지 통째로 들어가 용량이 커지고 ST 로딩이
-// 느려질 수 있다는 점을 사용자가 인지하고 감수하기로 함(요청에 따름).
+// Gallery keeps lightweight metadata in settings; verified original image files
+// remain on the same ST server for access from every device.
+const GALLERY_PREFIX = 'polaroid_v1_';
+const galleryAssets = createAssetStore({ prefix: 'polaroid-image', headers: () => getContext().getRequestHeaders() });
+let galleryMigration = Promise.resolve();
+let galleryMigrating = false, galleryDirty = false;
+async function thumbnail(dataUrl) {
+    const image = new Image(); image.src = dataUrl; await image.decode();
+    const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    const result = canvas.toDataURL('image/jpeg', .75);
+    canvas.width = canvas.height = 0;
+    return result;
+}
+const photoUploads = new WeakMap(), deletingPhotos = new WeakSet();
+function offloadPhoto(item) {
+    if (deletingPhotos.has(item)) return Promise.resolve();
+    if (photoUploads.has(item)) return photoUploads.get(item);
+    const task = offloadPhotoNow(item).finally(() => photoUploads.delete(item));
+    photoUploads.set(item, task);return task;
+}
+async function offloadPhotoNow(item) {
+    if (!item.image?.startsWith('data:image/')) return;
+    const original = item.image;
+    const image = await galleryAssets.image(original);
+    let preview = image;
+    try { preview = await galleryAssets.image(await thumbnail(original)); } catch { /* Original is already verified. */ }
+    if (item.image !== original) return;
+    item.image = image; item.thumbnail = preview;
+    saveSettingsDebounced();
+}
+function migrateGalleryImages() {
+    galleryDirty = true;
+    if (galleryMigrating) return galleryMigration;
+    galleryMigrating = true;
+    galleryMigration = Promise.resolve().then(async () => {
+        do {
+            galleryDirty = false;
+            for (const items of Object.values(getGalleryStore())) for (const item of items || []) { if(item.image?.startsWith('data:image/')){await migrationTurn();await offloadPhoto(item);} }
+        } while (galleryDirty);
+    }).finally(() => { galleryMigrating = false; });
+    void galleryMigration.catch(error => {
+        console.warn('[Polaroid] 사진 이전 실패, 원본 유지:', error);
+        toastr.warning('사진 파일 저장을 완료하지 못해 원본을 설정에 유지했어. 갤러리를 다시 열면 재시도해.');
+    });
+    return galleryMigration;
+}
 function getGalleryStore() {
     if (!extension_settings[EXT]) extension_settings[EXT] = {};
     if (!extension_settings[EXT].gallery) extension_settings[EXT].gallery = {};
@@ -877,13 +915,17 @@ function openDB() {
 async function saveToGallery(charName, base64Image, meta) {
     const gallery = getGalleryStore();
     if (!gallery[charName]) gallery[charName] = [];
+    if (meta.legacySource && gallery[charName].some(item => item.legacySource === meta.legacySource)) return;
     const id = Date.now() + '_' + Math.floor(Math.random() * 1e6);
-    gallery[charName].unshift({ id, character: charName, image: base64Image, ...meta });
+    const item = { id, character: charName, image: base64Image, ...meta };
+    gallery[charName].unshift(item);
     saveSettingsDebounced();
+    migrateGalleryImages();
     console.log('[Polaroid] extension_settings 저장 완료:', id);
 }
 
 async function loadGallery(charName) {
+    migrateGalleryImages();
     const gallery = getGalleryStore();
     return (gallery[charName] || []).slice(); // 원본 배열 변형 방지용 복사본
 }
@@ -902,7 +944,7 @@ async function exportGalleryPhotos(charName) {
             const item = items[i];
             const ts = item.timestamp ? new Date(item.timestamp).toISOString().replace(/[:.]/g, '-') : `${i}`;
             const a = document.createElement('a');
-            a.href = item.image; // 이미 "data:image/jpeg;base64,..." 형태로 저장돼있음
+            a.href = item.image; // Inline original or verified same-origin file.
             a.download = `polaroid_${charName}_${ts}.jpg`;
             document.body.appendChild(a);
             a.click();
@@ -920,8 +962,21 @@ async function exportGalleryPhotos(charName) {
 async function deleteFromGallery(charName, id) {
     const gallery = getGalleryStore();
     if (!gallery[charName]) return;
-    gallery[charName] = gallery[charName].filter(e => e.id !== id);
-    saveSettingsDebounced();
+    const item = gallery[charName].find(e => e.id === id);
+    if (!item) return;
+    deletingPhotos.add(item);
+    try {
+        await photoUploads.get(item)?.catch(() => {});
+        const others = Object.values(gallery).flat().filter(e => e !== item);
+        const shared = url => others.some(e => e.image === url || e.thumbnail === url);
+        if (galleryAssets.owns(item.image) && !shared(item.image)) await galleryAssets.remove(item.image);
+        gallery[charName] = gallery[charName].filter(e => e.id !== id);
+        saveSettingsDebounced();
+        if (item.thumbnail !== item.image && galleryAssets.owns(item.thumbnail) && !shared(item.thumbnail)) {
+            try { await galleryAssets.remove(item.thumbnail); }
+            catch(error) { console.warn('[Polaroid] 삭제한 사진의 썸네일 정리 실패:', error); }
+        }
+    } catch(error) { deletingPhotos.delete(item); throw error; }
 }
 
 async function allGalleryChars() {
@@ -944,15 +999,16 @@ async function migrateLocalStorageGallery() {
             for (const key of keys) {
                 let arr = [];
                 try { arr = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
-                for (const item of arr) {
+                for (const [position, item] of arr.entries()) {
                     if (!item?.image || !item?.character) continue;
                     await saveToGallery(item.character, item.image, {
+                        legacySource: `${key}:${item.id || position}`,
                         timestamp: item.timestamp || new Date().toISOString(),
                         snippet: item.snippet || '',
                         prompt: item.prompt || '',
                     });
                 }
-                localStorage.removeItem(key);
+                // Keep the legacy backup: a debounced settings save is not durable confirmation.
             }
             console.log(`[Polaroid] localStorage → 서버 마이그레이션 완료 (${keys.length}개 키)`);
         }
@@ -1257,7 +1313,7 @@ async function renderGrid(gridEl, charName) {
         card.className = 'pol-card';
         card.innerHTML = `
             <div class="pol-frame pol-frame-sm">
-                <img src="${item.image}" class="pol-img pol-img-thumb" loading="lazy" />
+                <img src="${item.thumbnail || item.image}" class="pol-img pol-img-thumb" loading="lazy" />
                 <div class="pol-name">${item.character}</div>
                 <div class="pol-date">${new Date(item.timestamp).toLocaleDateString('ko-KR')}</div>
                 <div class="pol-actions">
@@ -1275,8 +1331,8 @@ async function renderGrid(gridEl, charName) {
         });
         bindTap(card.querySelector('.pol-del'), async () => {
             if (confirm('이 사진을 삭제할까요?')) {
-                await deleteFromGallery(charName, item.id);
-                renderGrid(gridEl, charName);
+                try { await deleteFromGallery(charName, item.id); renderGrid(gridEl, charName); }
+                catch(error) { toastr.error(error.message); }
             }
         });
         gridEl.appendChild(card);
@@ -1609,8 +1665,8 @@ jQuery(async () => {
     if (!extension_settings[EXT]) extension_settings[EXT] = {};
     extension_settings[EXT] = Object.assign({}, DEFAULTS, extension_settings[EXT]);
 
-    await migrateLocalStorageGallery();
     await setupSettings();
+    void migrateLocalStorageGallery().then(migrateGalleryImages).catch(error => console.warn('[Polaroid] 이전 자료 유지:', error));
     injectWandMenu();
 
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, mesId => {
